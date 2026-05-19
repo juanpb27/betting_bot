@@ -1,0 +1,23 @@
+data_freshness:
+  max_odds_age_minutes: 30
+  min_minutes_before_match: 60
+
+matching:
+  min_team_match_confidence: 90.0
+  time_window_hours: 6
+
+quality_gates:
+  require_sharp_quoted: true           # exige cotización de Pinnacle para calcular p_real
+  min_comparison_books_quoted: 2       # mínimo de casas EU con cuota antes de evaluar valor
+
+notification:
+  # Cuánto por encima de la cuota mínima sugerimos para stake "full" vs "half"
+  full_stake_margin_pct: 0.04        # threshold_full = min_odds * (1 + 0.04)
+  half_stake_margin_pct: 0.02        # threshold_half = min_odds * (1 + 0.02)
+
+api_quota:
+  alert_threshold_pct: 0.20          # alertar si quedan <20% de requests del plan
+
+dead_mans_switch:
+  ping_interval_minutes: 60
+  alert_after_no_ping_hours: 8

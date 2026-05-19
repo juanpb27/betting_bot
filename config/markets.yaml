@@ -1,0 +1,30 @@
+markets:
+  - key: h2h
+    name: 1X2
+    outcomes: [home, draw, away]
+    devigging_method: shin
+    min_ev: 0.03
+    enabled: true
+
+  - key: totals
+    name: Over/Under
+    outcomes: [over, under]
+    lines: [2.5]                    # admite agregar 1.5, 3.5 en fase 1.5
+    devigging_method: multiplicative
+    min_ev: 0.025
+    enabled: true
+
+  - key: btts
+    name: Both Teams To Score
+    outcomes: ["yes", "no"]              # quoted: YAML 1.1 parsea yes/no como bool sin comillas
+    devigging_method: multiplicative
+    min_ev: 0.025
+    enabled: true
+
+  - key: spreads
+    name: Asian Handicap
+    outcomes: [home, away]
+    lines_strategy: sharp_consensus      # toma la línea del sharp reference; no hardcodeamos
+    devigging_method: multiplicative
+    min_ev: 0.025
+    enabled: true

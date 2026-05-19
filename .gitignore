@@ -216,3 +216,25 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# =============================================================================
+# Betting Bot — project-specific
+# =============================================================================
+.env.*
+!.env.example
+
+data/
+credentials/
+backups/
+logs/
+
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+

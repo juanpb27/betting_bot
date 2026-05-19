@@ -1,0 +1,46 @@
+leagues:
+  - key: soccer_epl
+    api_football_id: 39
+    name: Premier League
+    country: England
+    priority: high
+    active: true
+
+  - key: soccer_spain_la_liga
+    api_football_id: 140
+    name: LaLiga
+    country: Spain
+    priority: high
+    active: true
+
+  - key: soccer_italy_serie_a
+    api_football_id: 135
+    name: Serie A
+    country: Italy
+    priority: high
+    active: true
+
+  - key: soccer_germany_bundesliga
+    api_football_id: 78
+    name: Bundesliga
+    country: Germany
+    priority: high
+    active: true
+
+  - key: soccer_uefa_champs_league
+    api_football_id: 2
+    name: UEFA Champions League
+    priority: high
+    active: true
+
+  - key: soccer_uefa_europa_league
+    api_football_id: 3
+    name: UEFA Europa League
+    priority: medium
+    active: true
+
+  - key: soccer_fifa_world_cup
+    api_football_id: 1
+    name: FIFA World Cup 2026
+    priority: high
+    active: false                     # activar manualmente cuando empiece el torneo

@@ -1,0 +1,46 @@
+sharp_reference:
+  key: pinnacle
+  region: eu
+  description: "Market maker, used for p_real calculation"
+
+comparison_books:
+  - key: bet365
+    region: eu
+    enabled: true
+  - key: betsson
+    region: eu
+    enabled: true
+  - key: williamhill
+    region: eu
+    enabled: true
+  - key: sport888
+    region: eu
+    enabled: true
+  - key: betvictor
+    region: eu
+    enabled: true
+  - key: marathonbet
+    region: eu
+    enabled: true
+
+destination_books:
+  - name: BetPlay
+    code: betplay
+    url: https://www.betplay.com.co
+    allocation_pct: 30
+    enabled: true
+  - name: Codere
+    code: codere
+    url: https://codere.com.co
+    allocation_pct: 25
+    enabled: true
+  - name: Rushbet
+    code: rushbet
+    url: https://www.rushbet.co
+    allocation_pct: 25
+    enabled: true
+  - name: bwin
+    code: bwin
+    url: https://sports.bwin.co
+    allocation_pct: 20
+    enabled: true
