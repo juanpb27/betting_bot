@@ -89,10 +89,13 @@ curl -H "x-apisports-key: YOUR_KEY" "https://v3.football.api-sports.io/status"
 
 1. https://healthchecks.io/ → Sign up (free tier: 20 checks, suficiente).
 2. Crear check "betting-bot-pipeline".
-   - Schedule: cada 1 hora.
-   - Grace time: 8 horas.
-   - Integraciones: email + Telegram.
-3. Copiar la URL del ping (formato `https://hc-ping.com/<uuid>`) → `HEALTHCHECKS_URL` en `.env`.
+   - Schedule: Period **1 hour**, Grace time **8 hours**.
+3. Configurar integraciones (sección **Integrations** del menú principal, a nivel de cuenta):
+   - **Email**: queda configurado automáticamente con tu cuenta.
+   - **Telegram** (opcional, recomendado): seguir el flow para vincular `@healthchecks_io_bot` a tu Telegram. Es un bot distinto al del proyecto.
+   - Asignar ambas integraciones al check.
+4. Copiar la URL del ping (formato `https://hc-ping.com/<uuid>`) → la guardás para pegar en `HEALTHCHECKS_URL` cuando armes el `.env` en Etapa 1.
+5. **Pausar el check** (botón "Pause" en la página del check) mientras desarrollás. Mientras no haya sistema corriendo, no querés alertas falsas cada 8h. Lo reanudás en Etapa 10 al deployar.
 
 ### 1.6 Cuentas en casas de apuestas (paralelo)
 
@@ -342,7 +345,8 @@ Cada etapa es un bloque de trabajo coherente con entregable verificable. No hay 
 
 - Deploy al servidor Vultr (sección 5).
 - Configurar systemd timers.
-- Monitoring: log rotation, healthchecks.io vinculado, backup automático.
+- Monitoring: log rotation, backup automático.
+- **Reanudar el check de healthchecks.io** (botón "Resume" en la página del check). Verificar que el primer ping del heartbeat lo saca de estado "paused" a "up".
 - **Validación previa** con bankroll de juguete corriendo en el servidor:
   - CLV cercano a 0 o positivo.
   - Sin convergencia fallida en Shin.

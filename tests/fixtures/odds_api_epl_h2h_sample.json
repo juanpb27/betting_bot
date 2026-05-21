@@ -1,0 +1,182 @@
+[
+  {
+    "id": "aa1e33369fe2c3eb75c2414a4f3a46b3",
+    "sport_key": "soccer_epl",
+    "sport_title": "EPL",
+    "commence_time": "2026-05-24T15:00:00Z",
+    "home_team": "Crystal Palace",
+    "away_team": "Arsenal",
+    "bookmakers": [
+      {
+        "key": "pinnacle",
+        "title": "Pinnacle",
+        "last_update": "2026-05-20T22:03:31Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-05-20T22:03:31Z",
+            "outcomes": [
+              {
+                "name": "Arsenal",
+                "price": 1.82
+              },
+              {
+                "name": "Crystal Palace",
+                "price": 4.12
+              },
+              {
+                "name": "Draw",
+                "price": 4.1
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betsson",
+        "title": "Betsson",
+        "last_update": "2026-05-20T22:03:08Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-05-20T22:03:08Z",
+            "outcomes": [
+              {
+                "name": "Arsenal",
+                "price": 1.82
+              },
+              {
+                "name": "Crystal Palace",
+                "price": 4.2
+              },
+              {
+                "name": "Draw",
+                "price": 4.0
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "353fa2742803b8f3add6a41e0caba1c9",
+    "sport_key": "soccer_epl",
+    "sport_title": "EPL",
+    "commence_time": "2026-05-24T15:00:00Z",
+    "home_team": "Manchester City",
+    "away_team": "Aston Villa",
+    "bookmakers": [
+      {
+        "key": "betsson",
+        "title": "Betsson",
+        "last_update": "2026-05-20T22:03:08Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-05-20T22:03:08Z",
+            "outcomes": [
+              {
+                "name": "Aston Villa",
+                "price": 8.0
+              },
+              {
+                "name": "Manchester City",
+                "price": 1.36
+              },
+              {
+                "name": "Draw",
+                "price": 5.5
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "pinnacle",
+        "title": "Pinnacle",
+        "last_update": "2026-05-20T22:03:31Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-05-20T22:03:31Z",
+            "outcomes": [
+              {
+                "name": "Aston Villa",
+                "price": 7.42
+              },
+              {
+                "name": "Manchester City",
+                "price": 1.37
+              },
+              {
+                "name": "Draw",
+                "price": 5.77
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "e40f21dfd23441c1f799a508301076e9",
+    "sport_key": "soccer_epl",
+    "sport_title": "EPL",
+    "commence_time": "2026-05-24T15:00:00Z",
+    "home_team": "Nottingham Forest",
+    "away_team": "Bournemouth",
+    "bookmakers": [
+      {
+        "key": "pinnacle",
+        "title": "Pinnacle",
+        "last_update": "2026-05-20T22:03:31Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-05-20T22:03:31Z",
+            "outcomes": [
+              {
+                "name": "Bournemouth",
+                "price": 2.13
+              },
+              {
+                "name": "Nottingham Forest",
+                "price": 3.28
+              },
+              {
+                "name": "Draw",
+                "price": 3.86
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "betsson",
+        "title": "Betsson",
+        "last_update": "2026-05-20T22:03:08Z",
+        "markets": [
+          {
+            "key": "h2h",
+            "last_update": "2026-05-20T22:03:08Z",
+            "outcomes": [
+              {
+                "name": "Bournemouth",
+                "price": 2.15
+              },
+              {
+                "name": "Nottingham Forest",
+                "price": 3.2
+              },
+              {
+                "name": "Draw",
+                "price": 3.8
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]
