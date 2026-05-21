@@ -8,17 +8,11 @@ from sqlalchemy.orm import Session
 
 from betting_bot.persistence.models import Event, OddsSnapshot, Pick, SystemState
 from betting_bot.persistence.repo import EventRepo, OddsRepo, PickRepo, SystemStateRepo
+from tests.factories import build_event, build_pick
 
 
 def _add_event(session: Session, odds_api_id: str | None = None) -> Event:
-    event = Event(
-        odds_api_id=odds_api_id,
-        league_key="soccer_epl",
-        home_team="Arsenal",
-        away_team="Chelsea",
-        commence_time=datetime(2026, 5, 25, 19, 0, tzinfo=UTC),
-        status="scheduled",
-    )
+    event = build_event(odds_api_id=odds_api_id)
     session.add(event)
     session.flush()
     return event
@@ -31,24 +25,7 @@ def _build_pick(
     line: float | None = None,
 ) -> Pick:
     """Pick con campos requeridos en valores dummy. `generated_*` los setea el repo."""
-    return Pick(
-        event_id=event_id,
-        market_key=market_key,
-        outcome=outcome,
-        line=line,
-        reference_book="pinnacle",
-        reference_price=2.0,
-        reference_prob=0.52,
-        devigging_method="shin",
-        comparison_book="bet365",
-        comparison_price=2.15,
-        min_odds_for_value=2.05,
-        ev_at_comparison=0.05,
-        kelly_fraction=0.012,
-        stake_recommended=30000,
-        stake_pct_of_bankroll=0.012,
-        bankroll_at_generation=2500000,
-    )
+    return build_pick(event_id, market_key=market_key, outcome=outcome, line=line)
 
 
 # --- EventRepo ----------------------------------------------------------------

@@ -8,38 +8,18 @@ import pytest
 from sqlalchemy.orm import Session
 
 from betting_bot.bankroll.ledger import BankrollLedger
-from betting_bot.persistence.models import Event, Pick
+from tests.factories import build_event, build_pick
 
 VALID_BOOK = "betplay"
 
 
 def _make_pick(session: Session) -> str:
     """Inserta un Event + Pick mínimos y devuelve el pick.id (para stakes/payouts)."""
-    event = Event(
-        league_key="soccer_epl",
-        home_team="Arsenal",
-        away_team="Chelsea",
-        commence_time=datetime(2026, 5, 25, 19, 0, tzinfo=UTC),
-        status="scheduled",
-    )
+    event = build_event()
     session.add(event)
     session.flush()
-    pick = Pick(
-        event_id=event.id,
-        market_key="h2h",
-        outcome="home",
-        reference_book="pinnacle",
-        reference_price=2.0,
-        reference_prob=0.52,
-        devigging_method="shin",
-        comparison_book="bet365",
-        comparison_price=2.15,
-        min_odds_for_value=2.05,
-        ev_at_comparison=0.05,
-        kelly_fraction=0.012,
-        stake_recommended=30000,
-        stake_pct_of_bankroll=0.012,
-        bankroll_at_generation=2500000,
+    pick = build_pick(
+        event.id,
         generated_at=datetime(2026, 5, 20, 12, 0, tzinfo=UTC),
         generated_date=date(2026, 5, 20),
     )
@@ -62,6 +42,7 @@ def test_record_deposit_stores_positive_amount(session: Session) -> None:
 
 def test_record_withdrawal_stores_negative_amount(session: Session) -> None:
     ledger = BankrollLedger(session)
+    ledger.record_deposit(VALID_BOOK, 200000)
     mv = ledger.record_withdrawal(VALID_BOOK, 100000)
     assert mv.movement_type == "withdrawal"
     assert mv.amount == -100000
@@ -70,6 +51,7 @@ def test_record_withdrawal_stores_negative_amount(session: Session) -> None:
 def test_record_bet_stake_stores_negative_amount_with_pick(session: Session) -> None:
     pick_id = _make_pick(session)
     ledger = BankrollLedger(session)
+    ledger.record_deposit(VALID_BOOK, 100000)
     mv = ledger.record_bet_stake(VALID_BOOK, 30000, pick_id)
     assert mv.movement_type == "bet_stake"
     assert mv.amount == -30000
@@ -87,6 +69,7 @@ def test_record_bet_payout_stores_positive_amount_with_pick(session: Session) ->
 
 def test_record_adjustment_keeps_sign(session: Session) -> None:
     ledger = BankrollLedger(session)
+    ledger.record_deposit(VALID_BOOK, 100000)
     negative = ledger.record_adjustment(VALID_BOOK, -25000, notes="bonus expirado")
     positive = ledger.record_adjustment(VALID_BOOK, 10000, notes="reconciliación")
     assert negative.amount == -25000
@@ -94,7 +77,7 @@ def test_record_adjustment_keeps_sign(session: Session) -> None:
     assert positive.amount == 10000
 
 
-# --- Validaciones -------------------------------------------------------------
+# --- Validaciones de input ----------------------------------------------------
 
 
 def test_unknown_book_code_raises(session: Session) -> None:
@@ -135,6 +118,43 @@ def test_zero_adjustment_raises(session: Session) -> None:
     ledger = BankrollLedger(session)
     with pytest.raises(ValueError, match="0"):
         ledger.record_adjustment(VALID_BOOK, 0)
+
+
+# --- Saldo negativo: el ledger lo rechaza -------------------------------------
+
+def test_withdrawal_exceeding_balance_raises(session: Session) -> None:
+    ledger = BankrollLedger(session)
+    ledger.record_deposit(VALID_BOOK, 50000)
+    with pytest.raises(ValueError, match="negativo"):
+        ledger.record_withdrawal(VALID_BOOK, 50001)
+
+
+def test_withdrawal_from_empty_book_raises(session: Session) -> None:
+    ledger = BankrollLedger(session)
+    with pytest.raises(ValueError, match="negativo"):
+        ledger.record_withdrawal(VALID_BOOK, 1000)
+
+
+def test_withdrawal_to_exact_zero_is_allowed(session: Session) -> None:
+    ledger = BankrollLedger(session)
+    ledger.record_deposit(VALID_BOOK, 50000)
+    ledger.record_withdrawal(VALID_BOOK, 50000)
+    assert ledger.get_balance_by_book()[VALID_BOOK] == 0
+
+
+def test_bet_stake_exceeding_balance_raises(session: Session) -> None:
+    pick_id = _make_pick(session)
+    ledger = BankrollLedger(session)
+    ledger.record_deposit(VALID_BOOK, 20000)
+    with pytest.raises(ValueError, match="negativo"):
+        ledger.record_bet_stake(VALID_BOOK, 30000, pick_id)
+
+
+def test_negative_adjustment_exceeding_balance_raises(session: Session) -> None:
+    ledger = BankrollLedger(session)
+    ledger.record_deposit(VALID_BOOK, 10000)
+    with pytest.raises(ValueError, match="negativo"):
+        ledger.record_adjustment(VALID_BOOK, -25000)
 
 
 # --- Cálculo de balances ------------------------------------------------------

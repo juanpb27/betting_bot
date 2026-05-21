@@ -88,3 +88,21 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/).
 
 ### Siguiente sesión
 - Etapa 3: ingesta con contratos — `ingestion/schemas.py` (Pydantic), `ingestion/fixtures.py`, `ingestion/odds.py`, `ingestion/normalizer.py`, tests con los fixtures JSON capturados en Etapa 1.
+
+---
+
+## [2026-05-20] — Sesión 4: hardening de tests (post review de tech lead)
+
+### Hecho
+- Review de la suite por el tech lead: los 32 tests pasaban pero las garantías duras (índices únicos, FKs, CHECKs) no se ejercían — falsa sensación de seguridad.
+- `bankroll/ledger.py`: el ledger ahora rechaza cualquier movimiento que deje una casa en saldo negativo (nuevo `_book_balance`, check en `_record`). 5 tests TDD nuevos (withdrawal/stake/adjustment que sobrepasan el saldo, retiro a cero exacto permitido).
+- `tests/unit/test_schema_constraints.py` (7 tests): insertan filas directo por la sesión para probar que la DB rechaza picks duplicados (los dos índices únicos parciales), FKs huérfanas (`PRAGMA foreign_keys=ON`) y `movement_type`/`status`/singleton inválidos (CHECKs).
+- `tests/integration/test_schema.py`: test de drift — `alembic check` sobre una DB temporal falla si los modelos divergen de las migraciones (los tests unitarios usan `create_all()` y no lo detectarían).
+- `tests/factories.py`: `build_event`/`build_pick` — elimina la duplicación de helpers entre archivos de test.
+- 45 tests passing (32 → 45), ruff y mypy limpios, coverage del ledger 100%.
+
+### Decisiones tomadas
+- El ledger rechaza saldo negativo en cualquier casa: no se puede tener saldo negativo en una casa de apuestas real, así que el ledger tampoco lo permite. Aplica a withdrawal, bet_stake y adjustment negativo.
+
+### Siguiente sesión
+- Etapa 3: ingesta con contratos — `ingestion/schemas.py` (Pydantic), `ingestion/fixtures.py`, `ingestion/odds.py`, `ingestion/normalizer.py`, tests con los fixtures JSON capturados en Etapa 1.

@@ -26,6 +26,15 @@ class BankrollLedger:
             raise ValueError(
                 f"book_code desconocido: {book_code!r} (no está en config/books.yaml)"
             )
+        # Una casa de apuestas real nunca queda en saldo negativo: el ledger
+        # rechaza cualquier movimiento que dejara el saldo de la casa bajo cero.
+        if amount < 0:
+            balance = self._book_balance(book_code)
+            if balance + amount < 0:
+                raise ValueError(
+                    f"{movement_type}: dejaría {book_code} en saldo negativo "
+                    f"(saldo actual {balance}, movimiento {amount})"
+                )
         movement = BankrollMovement(
             book_code=book_code,
             movement_type=movement_type,
@@ -36,6 +45,15 @@ class BankrollLedger:
         self._session.add(movement)
         self._session.flush()  # asigna el id autoincrement sin commitear
         return movement
+
+    def _book_balance(self, book_code: str) -> int:
+        """Saldo actual de una casa según los movimientos ya registrados."""
+        total = self._session.execute(
+            select(func.sum(BankrollMovement.amount)).where(
+                BankrollMovement.book_code == book_code
+            )
+        ).scalar()
+        return int(total) if total is not None else 0
 
     def record_deposit(
         self, book_code: str, amount: int, notes: str | None = None
