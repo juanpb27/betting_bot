@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     timezone: str = "America/Bogota"
 
+    # --- Moneda del sistema
+    currency: str = "COP"
+
     @field_validator("log_level")
     @classmethod
     def _validate_log_level(cls, v: str) -> str:
@@ -46,6 +49,15 @@ class Settings(BaseSettings):
         upper = v.upper()
         if upper not in allowed:
             raise ValueError(f"log_level debe ser uno de {allowed}")
+        return upper
+
+    @field_validator("currency")
+    @classmethod
+    def _validate_currency(cls, v: str) -> str:
+        allowed = {"COP", "USD"}
+        upper = v.upper()
+        if upper not in allowed:
+            raise ValueError(f"currency debe ser uno de {allowed}")
         return upper
 
     @model_validator(mode="after")

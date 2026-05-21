@@ -457,7 +457,7 @@ Desde Telegram, con la plata ya depositada en cada casa:
 /balance
 ```
 
-Verificar que `/balance` muestra 2,500,000 COP total.
+Verificar que `/balance` muestra 2,500,000 total (en la moneda del deployment).
 
 ---
 

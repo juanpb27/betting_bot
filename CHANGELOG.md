@@ -46,5 +46,45 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/).
 - `check_google_sheets()` importa `gspread`/`google-auth` dentro de la función: evita import-time error si las credenciales no están; el error se reporta en la tabla de checks.
 - El healthcheck nunca pinguea healthchecks.io: el ping real es exclusivo del final del pipeline y de `cli/heartbeat.py`. Verificar conectividad y pingear son acciones distintas que no deben mezclarse.
 
+---
+
+## [2026-05-20] — Sesión 2: Etapa 2 completada
+
+### Hecho
+- `src/betting_bot/ids.py`: `new_id()` — UUID v4 como ID de entidades cross-system.
+- `src/betting_bot/persistence/models.py`: 8 modelos SQLAlchemy 2.0 declarativos (`Event`, `OddsSnapshot`, `Pick`, `BankrollMovement`, `BankrollBookSnapshot`, `SystemState`, `ApiQuotaLog`, `OperationLog`) según DESIGN.md sección 1.
+- `src/betting_bot/persistence/db.py`: engine lazy con `lru_cache`, `session_scope()` transaccional, listener de PRAGMAs (`journal_mode=WAL`, `foreign_keys=ON`), `resolve_database_url()` (resuelve paths relativos a la raíz del repo).
+- `src/betting_bot/yaml_config.py`: loader YAML mínimo + `load_book_codes()` (lee `config/books.yaml`).
+- `src/betting_bot/bankroll/ledger.py`: `BankrollLedger` — `record_deposit/withdrawal/bet_stake/bet_payout/adjustment`, `get_balance_by_book`, `get_total_balance`. Valida `book_code` y signo de montos.
+- `src/betting_bot/persistence/repo.py`: `EventRepo`, `OddsRepo`, `PickRepo` (con `create` idempotente), `SystemStateRepo` (singleton get-or-create).
+- Alembic configurado: `env.py` conectado a `Base.metadata` y a `DATABASE_URL` de `.env`, `render_as_batch=True`. Migración `6365f10cee0c_initial_schema` autogenerada y aplicada → `data/betting_bot.db` con las 8 tablas; `downgrade base` revierte limpio.
+- Tests: `tests/conftest.py` (DB SQLite en memoria), `test_ledger.py` (18), `test_repos.py` (14). **32 tests passing**, ruff y mypy limpios, **coverage del ledger 100%**.
+
+### Decisiones tomadas
+- IDs con UUID **v4** en lugar del v7 de DESIGN.md: a la escala del proyecto (miles de filas) la ordenabilidad de v7 no aporta nada — la ordenabilidad ya la dan las columnas de timestamp dedicadas — y v4 evita código propio y la migración a Python 3.14.
+- Índice de idempotencia de `picks`: **dos índices únicos parciales** (`idx_picks_unique_with_line` / `idx_picks_unique_no_line` con `sqlite_where`) en lugar del único índice con `COALESCE(line, -999)` de DESIGN.md. SQLite no refleja índices de expresión y Alembic no los autogenera; los parciales sobre columnas planas sí, dan la misma garantía y son portables a Postgres.
+- Fila singleton de `system_state` no se siembra en la migración (Alembic no genera `INSERT`s de data): se asegura vía `SystemStateRepo.get()` con get-or-create idempotente.
+- Repos y ledger operan sobre una `Session` inyectada y no commitean — el llamador controla la transacción.
+- Árbol `migrations/` excluido de ruff y mypy: son artefactos generados por Alembic.
+
+---
+
+## [2026-05-20] — Sesión 3: refactor currency-neutral
+
+### Hecho
+- Codebase agnóstico de moneda: un mismo código desplegable en COP o USD, cada deployment con su DB y su moneda única (sin mezcla de monedas).
+- Renombradas las 11 columnas de plata quitando el sufijo `_cop` (`amount`, `balance`, `pnl`, `stake_recommended`, `bankroll_at_generation`, `actual_stake`, `deposits_today`, `withdrawals_today`, `stakes_today`, `payouts_today`, `pnl_today`) en `models.py`, `ledger.py` y sus tests.
+- `config.py`: nuevo setting `currency` (default `COP`, validado contra `{COP, USD}`); `.env.example` con `CURRENCY=COP`.
+- `config/bankroll.yaml`: `max_stake_per_event_cop` → `max_stake_per_event`; nuevo `stake_rounding_unit: 1000` (granularidad de redondeo del stake, per-deployment).
+- `PickRepo._find_duplicate`: reemplazado `func.coalesce(line, -999)` por branch `is_(None)` — mismo criterio que los dos índices parciales, sin número mágico.
+- Migración inicial regenerada (`5c188d55ae7c`) con los nombres neutros; `data/betting_bot.db` recreada.
+- DESIGN.md, CLAUDE.md, RUNBOOK.md actualizados: schema, queries de bankroll, `calculate_stake` (param `rounding_unit` en vez de `-3` hardcodeado), formato Telegram, convención de montos.
+- 32 tests passing, ruff y mypy limpios, coverage del ledger 100%.
+
+### Decisiones tomadas
+- Montos enteros sin decimales también en USD (dólares enteros): coherente con que COP ya se redondea a miles; un sistema de tracking no necesita precisión al centavo.
+- `currency` es solo etiqueta de presentación (formato Telegram/Sheets, Etapa 5/6) + base del redondeo de stake. La lógica del bot (Kelly, EV, de-vigging, sumas del ledger) es agnóstica de moneda.
+- `config/*.yaml` son per-deployment, no compartidos: un deployment USD tendría otras casas y otros montos.
+
 ### Siguiente sesión
-- Etapa 2: `persistence/models.py`, setup Alembic, primera migración, `persistence/repo.py`, `bankroll/ledger.py` con TDD.
+- Etapa 3: ingesta con contratos — `ingestion/schemas.py` (Pydantic), `ingestion/fixtures.py`, `ingestion/odds.py`, `ingestion/normalizer.py`, tests con los fixtures JSON capturados en Etapa 1.

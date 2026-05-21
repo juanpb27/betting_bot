@@ -3,8 +3,9 @@ staking:
   kelly_divisor: 4
   cap_pct: 0.03
   floor_pct: 0.003
+  stake_rounding_unit: 1000
 
 risk_controls:
   pause_on_weekly_drawdown_pct: 0.05
   max_picks_per_day: 15
-  max_stake_per_event_cop: 75000
+  max_stake_per_event: 75000

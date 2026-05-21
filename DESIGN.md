@@ -5,9 +5,9 @@
 ## 1. Modelo de datos
 
 ### Convenciones generales
-- IDs internos: UUID v7 (sortable por tiempo) para entidades con identidad cross-system (`events`, `picks`). Bigint autoincrement para tablas internas (`odds_snapshots`, `bankroll_movements`, etc.).
+- IDs internos: UUID v4 para entidades con identidad cross-system (`events`, `picks`). Bigint autoincrement para tablas internas (`odds_snapshots`, `bankroll_movements`, etc.). No se usa v7: a la escala del proyecto su ordenabilidad no aporta (el orden cronológico ya lo dan las columnas de timestamp) y v4 evita código propio.
 - Timestamps: TIMESTAMP, almacenar en UTC, convertir a `America/Bogota` solo en presentación.
-- Monedas: COP, integer.
+- Montos: enteros, sin decimales, en la moneda del deployment (`CURRENCY` en `.env` — COP o USD). Un deployment es mono-moneda.
 - Cuotas decimales (no fraccionales ni americanas).
 - SQLite con WAL mode habilitado.
 
@@ -16,7 +16,7 @@
 ```sql
 -- Eventos (partidos)
 CREATE TABLE events (
-    id TEXT PRIMARY KEY,                    -- UUID v7
+    id TEXT PRIMARY KEY,                    -- UUID v4
     odds_api_id TEXT UNIQUE,                -- id estable de the-odds-api
     api_football_id INTEGER,                -- id de api-football
     league_key TEXT NOT NULL,
@@ -54,7 +54,7 @@ CREATE INDEX idx_odds_captured ON odds_snapshots(captured_at);
 
 -- Picks
 CREATE TABLE picks (
-    id TEXT PRIMARY KEY,                    -- UUID v7
+    id TEXT PRIMARY KEY,                    -- UUID v4
     event_id TEXT NOT NULL,
     market_key TEXT NOT NULL,
     outcome TEXT NOT NULL,
@@ -68,9 +68,9 @@ CREATE TABLE picks (
     min_odds_for_value REAL NOT NULL,
     ev_at_comparison REAL NOT NULL,
     kelly_fraction REAL NOT NULL,
-    stake_recommended_cop INTEGER NOT NULL,
+    stake_recommended INTEGER NOT NULL,
     stake_pct_of_bankroll REAL NOT NULL,
-    bankroll_at_generation_cop INTEGER NOT NULL,
+    bankroll_at_generation INTEGER NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN
         ('pending', 'placed', 'skipped', 'won', 'lost', 'pushed', 'void')),
     generated_at TIMESTAMP NOT NULL,
@@ -78,9 +78,9 @@ CREATE TABLE picks (
     placed_at TIMESTAMP,
     actual_book TEXT,
     actual_price REAL,
-    actual_stake_cop INTEGER,
+    actual_stake INTEGER,
     settled_at TIMESTAMP,
-    pnl_cop INTEGER,
+    pnl INTEGER,
     clv REAL,
     closing_pinnacle_price REAL,
     skip_reason TEXT,
@@ -90,11 +90,16 @@ CREATE TABLE picks (
 CREATE INDEX idx_picks_event ON picks(event_id);
 CREATE INDEX idx_picks_status ON picks(status);
 CREATE INDEX idx_picks_generated ON picks(generated_at);
-CREATE UNIQUE INDEX idx_picks_unique ON picks(
-    event_id, market_key, outcome,
-    COALESCE(line, -999),
-    generated_date
-);
+-- Idempotencia diaria. Dos índices únicos parciales en vez de uno con
+-- COALESCE(line): `line` es nullable y en SQL NULL != NULL, así se separan los
+-- mercados con línea y sin línea. Columnas planas → SQLite los refleja y
+-- Alembic los autogenera (un índice de expresión no).
+CREATE UNIQUE INDEX idx_picks_unique_with_line ON picks(
+    event_id, market_key, outcome, line, generated_date
+) WHERE line IS NOT NULL;
+CREATE UNIQUE INDEX idx_picks_unique_no_line ON picks(
+    event_id, market_key, outcome, generated_date
+) WHERE line IS NULL;
 
 -- Ledger de bankroll: fuente de verdad
 CREATE TABLE bankroll_movements (
@@ -103,7 +108,7 @@ CREATE TABLE bankroll_movements (
     book_code TEXT NOT NULL,                -- betplay | codere | rushbet | bwin
     movement_type TEXT NOT NULL CHECK(movement_type IN
         ('deposit', 'withdrawal', 'bet_stake', 'bet_payout', 'adjustment')),
-    amount_cop INTEGER NOT NULL,            -- positivo = entra; negativo = sale
+    amount INTEGER NOT NULL,                -- positivo = entra; negativo = sale
     related_pick_id TEXT,                   -- FK a picks (NULL para deposit/withdrawal/adjustment)
     notes TEXT,                             -- opcional, especialmente útil para adjustment
     FOREIGN KEY (related_pick_id) REFERENCES picks(id)
@@ -117,15 +122,15 @@ CREATE TABLE bankroll_book_snapshots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     snapshot_date DATE NOT NULL,
     book_code TEXT NOT NULL,
-    balance_cop INTEGER NOT NULL,
-    deposits_today_cop INTEGER NOT NULL DEFAULT 0,
-    withdrawals_today_cop INTEGER NOT NULL DEFAULT 0,
-    stakes_today_cop INTEGER NOT NULL DEFAULT 0,
-    payouts_today_cop INTEGER NOT NULL DEFAULT 0,
+    balance INTEGER NOT NULL,
+    deposits_today INTEGER NOT NULL DEFAULT 0,
+    withdrawals_today INTEGER NOT NULL DEFAULT 0,
+    stakes_today INTEGER NOT NULL DEFAULT 0,
+    payouts_today INTEGER NOT NULL DEFAULT 0,
     picks_placed_today INTEGER NOT NULL DEFAULT 0,
     picks_won_today INTEGER NOT NULL DEFAULT 0,
     picks_lost_today INTEGER NOT NULL DEFAULT 0,
-    pnl_today_cop INTEGER NOT NULL DEFAULT 0,
+    pnl_today INTEGER NOT NULL DEFAULT 0,
     UNIQUE(snapshot_date, book_code)
 );
 CREATE INDEX idx_bbs_date ON bankroll_book_snapshots(snapshot_date);
@@ -173,12 +178,12 @@ CREATE INDEX idx_oplog_level ON operation_log(level);
 
 ```python
 # Total bankroll por casa
-SELECT book_code, SUM(amount_cop) AS balance_cop
+SELECT book_code, SUM(amount) AS balance
 FROM bankroll_movements
 GROUP BY book_code;
 
 # Bankroll total (suma de todas las casas)
-SELECT SUM(amount_cop) AS total_balance_cop
+SELECT SUM(amount) AS total_balance
 FROM bankroll_movements;
 ```
 
@@ -336,6 +341,7 @@ def assess_value(
     kelly_divisor: float = 4.0,
     cap_pct: float = 0.03,
     floor_pct: float = 0.003,
+    rounding_unit: int = 1000,
 ) -> ValueAssessment:
     """
     Evalúa si una oportunidad tiene valor positivo y calcula stake según Kelly fraccional.
@@ -364,7 +370,7 @@ def assess_value(
     else:
         stake_pct = min(kelly_frac, cap_pct)
 
-    stake = round(bankroll * stake_pct, -3)
+    stake = round(bankroll * stake_pct / rounding_unit) * rounding_unit
 
     return ValueAssessment(
         p_real=p_real, odds=odds, ev=ev,
@@ -577,11 +583,12 @@ staking:
   kelly_divisor: 4
   cap_pct: 0.03
   floor_pct: 0.003
+  stake_rounding_unit: 1000          # redondeo del stake, en unidades de la moneda
 
 risk_controls:
   pause_on_weekly_drawdown_pct: 0.05
   max_picks_per_day: 15
-  max_stake_per_event_cop: 75000
+  max_stake_per_event: 75000
 ```
 
 (El bankroll inicial NO está aquí — se registra vía Telegram con `/deposit` por cada casa, ver CLAUDE.md.)
@@ -628,11 +635,11 @@ dead_mans_switch:
 ✨ Mejor cuota EU: {best_eu_book} @ {best_eu_price:.2f} → EV {ev:.1%}
 
 🎲 Verificá tu casa (BetPlay/Codere/Rushbet/bwin):
-   • Si conseguís ≥ {threshold_full:.2f} → stake {stake_full_cop:,} (Kelly/4)
-   • Si conseguís ≥ {threshold_half:.2f} → stake {stake_half_cop:,} (Kelly reducido)
+   • Si conseguís ≥ {threshold_full:.2f} → stake {stake_full:,} (Kelly/4)
+   • Si conseguís ≥ {threshold_half:.2f} → stake {stake_half:,} (Kelly reducido)
    • Si conseguís < {min_odds:.2f} → DESCARTAR
 
-📝 Bankroll vivo: {bankroll_cop:,} COP
+📝 Bankroll vivo: {bankroll:,} {currency}
 ⏱️ Cuota expira aprox: {cutoff_local} ({min_minutes_before_match} min antes del partido)
 
 [✅ Ya apostada] [🚫 Descartar] [🔍 Ver detalles]
@@ -641,8 +648,8 @@ dead_mans_switch:
 Donde:
 - `threshold_full` = `min_odds * (1 + thresholds.notification.full_stake_margin_pct)`.
 - `threshold_half` = `min_odds * (1 + thresholds.notification.half_stake_margin_pct)`.
-- `stake_full_cop` = `calculate_stake(bankroll, p_real, threshold_full, ...)`.
-- `stake_half_cop` = `calculate_stake(bankroll, p_real, threshold_half, ...)` — **se recalcula Kelly a la cuota menor; no es `stake_full / 2`** (Kelly no es lineal en cuota).
+- `stake_full` = `calculate_stake(bankroll, p_real, threshold_full, ...)`.
+- `stake_half` = `calculate_stake(bankroll, p_real, threshold_half, ...)` — **se recalcula Kelly a la cuota menor; no es `stake_full / 2`** (Kelly no es lineal en cuota).
 - Si `threshold_half` resulta con `has_value=False` (EV bajo `min_ev`), se omite esa línea del mensaje.
 
 ## 7. Comportamiento de los botones Telegram
@@ -650,8 +657,8 @@ Donde:
 ### "Ya apostada"
 1. "¿En qué casa apostaste?" → inline buttons con las 4 casas.
 2. "¿Qué cuota conseguiste?" → input texto, valida decimal.
-3. "¿Stake real (COP)?" → input numérico.
-4. Confirma, guarda `picks` con `status='placed'` y crea movimiento `bankroll_movements` (`movement_type='bet_stake'`, `amount_cop` negativo, `related_pick_id=<pick_id>`).
+3. "¿Stake real?" → input numérico (entero, en la moneda del deployment).
+4. Confirma, guarda `picks` con `status='placed'` y crea movimiento `bankroll_movements` (`movement_type='bet_stake'`, `amount` negativo, `related_pick_id=<pick_id>`).
 
 ### "Descartar"
 Pregunta motivo (4 botones predefinidos):

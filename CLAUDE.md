@@ -140,7 +140,7 @@ Las casas blandas europeas (Bet365 EU, Betsson, William Hill, 888sport) suelen t
 
 ## Bankroll y gestión
 
-El bankroll **NO** se setea por variable de entorno. Vive en la DB como un ledger de movimientos (`bankroll_movements`). Cada depósito, retiro, stake apostado, payout cobrado, o ajuste manual es una fila. El saldo por casa en cualquier momento = `SUM(amount_cop) WHERE book_code = X`.
+El bankroll **NO** se setea por variable de entorno. Vive en la DB como un ledger de movimientos (`bankroll_movements`). Cada depósito, retiro, stake apostado, payout cobrado, o ajuste manual es una fila. El saldo por casa en cualquier momento = `SUM(amount) WHERE book_code = X`.
 
 ### Setup inicial del bankroll
 
@@ -169,7 +169,7 @@ La primera vez (o después de un reset en desarrollo) se registran deposits por 
 ### Staking
 
 - Kelly fraccional 1/4 con cap 3% y floor 0.3%, sobre el bankroll vivo (suma de saldos de todas las casas activas).
-- `max_stake_per_event_cop` para evitar concentración (suma stakes por event_id).
+- `max_stake_per_event` para evitar concentración (suma stakes por event_id).
 
 ### Ramp-up al iniciar producción
 
@@ -189,13 +189,13 @@ def kelly_fraction(p: float, decimal_odds: float, fraction: float = 0.25) -> flo
 
 def calculate_stake(bankroll: float, p_real: float, odds: float,
                     fraction: float = 0.25, cap: float = 0.03,
-                    floor: float = 0.003) -> float:
-    """Returns stake amount in COP, applying cap and floor."""
+                    floor: float = 0.003, rounding_unit: int = 1000) -> float:
+    """Returns stake amount in the deployment currency, applying cap and floor."""
     f = kelly_fraction(p_real, odds, fraction)
     if f < floor:
         return 0.0  # skip pick
     f = min(f, cap)
-    return round(bankroll * f, -3)  # round to nearest thousand COP
+    return round(bankroll * f / rounding_unit) * rounding_unit
 ```
 
 ## Métricas a trackear
@@ -265,7 +265,9 @@ betting_bot/
 ├── src/
 │   └── betting_bot/
 │       ├── __init__.py
-│       ├── config.py
+│       ├── config.py             # Pydantic Settings (variables de entorno)
+│       ├── ids.py                # generación de IDs (UUID v4)
+│       ├── yaml_config.py        # carga de los YAML de config/
 │       ├── ingestion/
 │       │   ├── fixtures.py
 │       │   ├── odds.py
@@ -276,6 +278,7 @@ betting_bot/
 │       │   ├── value.py
 │       │   └── kelly.py
 │       ├── persistence/
+│       │   ├── db.py             # engine, sesiones, PRAGMAs SQLite
 │       │   ├── models.py
 │       │   ├── repo.py
 │       │   └── migrations/
