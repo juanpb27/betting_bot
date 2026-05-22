@@ -289,13 +289,17 @@ def test_devig_shin_returns_zero_for_fair_market():
     assert abs(z - 0.0) < 1e-8
     assert all(abs(p - 1/3) < 1e-8 for p in fair)
 
-def test_devig_shin_favorite_unbiased():
-    """Shin debe asignar menos prob al favorito que el multiplicativo
-    (corrección por favorite-longshot bias)."""
+def test_devig_shin_corrects_favorite_longshot_bias():
+    """Shin asigna más prob al favorito y menos al longshot que el multiplicativo.
+    El multiplicativo reparte el overround uniformemente y deja el sesgo intacto;
+    Shin asume insider trading y "desinfla" más a los longshots (donde el sesgo del
+    público es mayor). Refs: Shin (1993, EJ 103); Štrumbelj (2014, IJF 30, eq. 5);
+    Buchdahl, J. — "How to remove the overround"."""
     prices = [1.40, 4.50, 8.00]
     shin_probs, _ = devig_shin(prices)
     mult_probs = devig_multiplicative(prices)
-    assert shin_probs[0] < mult_probs[0]
+    assert shin_probs[0] > mult_probs[0]   # favorito sube
+    assert shin_probs[-1] < mult_probs[-1]  # longshot baja
 
 def test_devig_shin_known_case():
     prices = [2.10, 3.40, 3.60]
@@ -319,6 +323,13 @@ def test_devig_shin_super_extreme():
 ```
 
 ## 3. Cálculo de EV y Kelly
+
+> **Snapshot del bankroll por corrida.** Una corrida del pipeline lee el bankroll vivo
+> UNA sola vez al inicio (`ledger.get_total_balance()`); ese valor se reusa como
+> `bankroll` para todos los picks de la corrida y se persiste en
+> `Pick.bankroll_at_generation`. Más simple, determinístico, sin races contra
+> movimientos vía Telegram. Los caps `max_stake_per_event` y `max_picks_per_day` de
+> `bankroll.yaml` protegen contra sobreexposición acumulada.
 
 ```python
 from dataclasses import dataclass

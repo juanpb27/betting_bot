@@ -1,23 +1,27 @@
-data_freshness:
-  max_odds_age_minutes: 30
-  min_minutes_before_match: 60
+# Marcas de consumo:
+#   [usado]    → el código ya lee y aplica esta clave hoy.
+#   [pendiente] → declarada para etapas posteriores; nadie la consume todavía.
 
-matching:
+data_freshness:
+  max_odds_age_minutes: 30          # [pendiente] — gating de freshness en Etapa 5
+  min_minutes_before_match: 60      # [pendiente] — gating de freshness en Etapa 5
+
+matching:                            # [usado] — ingestion/normalizer.py vía run_pipeline
   min_team_match_confidence: 90.0
   time_window_hours: 6
 
-quality_gates:
-  require_sharp_quoted: true           # exige cotización de Pinnacle para calcular p_real
-  min_comparison_books_quoted: 2       # mínimo de casas EU con cuota antes de evaluar valor
+quality_gates:                       # [usado] — pricing/picks.py
+  require_sharp_quoted: true         # exige cotización de Pinnacle para calcular p_real
+  min_comparison_books_quoted: 2     # mínimo de casas EU con cuota antes de evaluar valor
 
-notification:
+notification:                        # [pendiente] — formato Telegram, Etapa 5
   # Cuánto por encima de la cuota mínima sugerimos para stake "full" vs "half"
   full_stake_margin_pct: 0.04        # threshold_full = min_odds * (1 + 0.04)
   half_stake_margin_pct: 0.02        # threshold_half = min_odds * (1 + 0.02)
 
-api_quota:
+api_quota:                           # [pendiente] — alertas a Telegram, Etapa 5/7
   alert_threshold_pct: 0.20          # alertar si quedan <20% de requests del plan
 
-dead_mans_switch:
+dead_mans_switch:                    # [pendiente] — healthchecks.io ping, Etapa 8
   ping_interval_minutes: 60
   alert_after_no_ping_hours: 8

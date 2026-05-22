@@ -135,3 +135,59 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/).
 
 ### Siguiente sesión
 - Etapa 4: pricing — `pricing/devigging.py` (Shin con `brentq` + multiplicativo), `pricing/value.py`, `pricing/kelly.py`, con tests exhaustivos (TDD).
+
+---
+
+## [2026-05-22] — Sesión 6: Etapa 4 completada (pricing)
+
+### Hecho
+- `pricing/devigging.py`: `devig_multiplicative()` y `devig_shin()` (con `scipy.optimize.brentq`). Contrato `sum(fair)==1` ± 1e-8 sin re-normalización.
+- `pricing/kelly.py`: `kelly_fraction()` y `calculate_stake()` (cap, floor, `rounding_unit`).
+- `pricing/value.py`: `ValueAssessment` (frozen dataclass) + `assess_value()` (delega a `kelly.py`).
+- `pricing/picks.py`: `generate_picks_for_event()` — orquestador que toma snapshots + configs, aplica `quality_gates` (require sharp quoted, min comparison books), de-vigga el sharp, evalúa cada outcome contra la mejor cuota de comparación, y devuelve `Pick`s desconectados.
+- `yaml_config.py` extendido con `MarketConfig`/`StakingConfig`/`QualityGates` + loaders `load_active_markets`, `load_staking_config`, `load_quality_gates`, `load_sharp_reference_key`, `load_comparison_book_keys`.
+- `tests/factories.py`: `build_event()` ahora asigna `id` vía `new_id()` (los tests sin session necesitan PK; el default del modelo solo se aplica en flush). Nuevo `build_odds_snapshot()`.
+- `DESIGN.md §3`: nota explícita del snapshot único de bankroll por corrida.
+- `config/thresholds.yaml`: comentarios marcando qué claves consume el código hoy (`[usado]`) vs cuáles son para etapas posteriores (`[pendiente]`).
+- 128 tests unitarios + 3 de integración, ruff y mypy limpios, **coverage de `pricing/` 96%** (target del RUNBOOK alcanzado).
+
+### Revisión pre-commit (matemático + back-eng + TL) y fixes aplicados
+- **Resuelta la discrepancia de Shin en DESIGN.md §2.** Veredicto del experto: la **fórmula está correcta** (`B = Σπ` es la formulación canónica de Buchdahl / Štrumbelj 2014 / Shin 1993). Lo invertido era la **descripción**: Shin asigna MÁS prob al favorito (no menos), corrigiendo el favorite-longshot bias del retail. DESIGN.md §2 y el test fueron corregidos; agregado `test_devig_shin_corrects_favorite_longshot_bias` con fuentes citadas.
+- **Bugs de borde corregidos en `kelly.py`:** guard `decimal_odds <= 1.0` y `p <= 0.0` para evitar `ZeroDivisionError` en cuotas degeneradas.
+- **`value.py` — `min_odds_for_value` ahora es `(1 + min_ev) / p_real`** (cuota que dispara `has_value=True` con el `min_ev` configurado), no el breakeven `1/p`. Es el número útil operativamente. Guard agregado para `p_real <= 0`.
+- **`picks.py` — tie-break determinista** en mejor cuota de comparación: `(price, bookmaker_key)` en vez de orden de iteración, así dos corridas con los mismos snapshots producen el mismo `comparison_book`.
+- **`picks.py` — `bankroll <= 0` corta antes** de evaluar mercados (early return).
+- **`picks.py` — método de-vigging desconocido ahora `raise ValueError`** en vez de `return []` silencioso (typo en `markets.yaml` se enteraba nadie). Test actualizado a `pytest.raises`.
+
+### Decisiones tomadas
+- **Bankroll snapshot único por corrida.** Una lectura de `ledger.get_total_balance()` al inicio; se reusa para todos los picks de la corrida y se persiste en `Pick.bankroll_at_generation`. Más simple, determinístico, sin races contra `/deposit` vía Telegram.
+- **Solo `h2h` en esta etapa** (heredado de Etapa 3). El método `multiplicative` está implementado y testeado (lo usará totals/btts/spreads cuando se sumen).
+- **No se montó la integración con `run_pipeline.py`** (modo `--full`) — corresponde a Etapa 5 junto con persistencia (`PickRepo.create`) y delivery a Telegram. `generate_picks_for_event` devuelve `Pick` objects desconectados, listos para que Etapa 5 los persista.
+- **Coverage de `pricing/` 95%.** Las 5 líneas sin cubrir son ramas defensivas de error (`brentq` no bracketea, invariante Shin violado, `except` del try Shin en picks) que requieren mocking para ejercitar. Aceptable.
+
+### Deuda técnica (heredada + reiterada + nueva tras review)
+**Heredada / reiterada:**
+- `structlog` no montado y `operation_log` no se popula — para Etapa 8 (deploy + observabilidad).
+- Wiring de pricing en `run_pipeline.py --full` — Etapa 5.
+- Delivery a Telegram, persistencia de `Pick`s vía `PickRepo.create` — Etapa 5.
+- `SystemState.is_paused` no chequeado por el pipeline ni `last_pipeline_run_at` se actualiza — Etapa 5/7.
+- Test de TZ round-trip (`commence_time` con offset no-UTC) — flagged por TL, defer.
+- `cli/heartbeat.py`, `cli/telegram_listener.py` listados en CLAUDE.md pero ausentes — Etapa 5/8.
+
+**Nueva — diferida a Etapa 5 (consenso TL/back-eng):**
+- **Staleness gate** en `picks.py`: filtrar snapshots con `captured_at` viejo (>`max_odds_age_minutes` de `thresholds.yaml`, ya declarado como `[pendiente]`). Hoy se usan tal cual.
+- **Dedup de snapshots por `captured_at`**: si llegan dos snapshots de la misma casa+outcome (por reintentos de ingestión), `picks.py` queda con el orden de iteración. Debe quedarse con el más reciente.
+- **Logging del orchestrator**: por qué *no* se generó pick (sharp ausente, gates fallaron, EV bajo, Shin no convergió). Va con structlog en Etapa 5.
+- **`request_id` propagado** a `generate_picks_for_event` y a los `Pick`s — Etapa 5 lo va a necesitar para correlacionar corridas.
+- **Aplicación de `max_picks_per_day` y `max_stake_per_event`** (ya en `bankroll.yaml`): el orchestrator es por-evento, los caps son globales. El caller (Etapa 5) debe leerlos antes de iterar eventos.
+- **Persistencia de `z` (sharp_overround)** en `Pick`: hoy `picks.py` descarta el `z` que devuelve `devig_shin`. Es información analítica gratis (mide liquidez del sharp). Requiere migración de DB → mejor sumarlo *antes* de Etapa 5.
+- **Política de idempotencia explícita** en `PickRepo.create` ante duplicados: ¿raise o silent skip? El índice unique cubre la DB, falta la decisión a nivel API.
+- **Cacheo consistente en `yaml_config`**: `load_book_codes` usa `lru_cache`, los 5 loaders nuevos no. Unificar criterio.
+- **`MarketConfig.outcomes` a `tuple[str, ...]`**: hoy es `list` mutable dentro de un `@dataclass(frozen=True)`.
+- **Validación de rangos en `StakingConfig`** (`kelly_divisor > 0`, `0 < cap_pct ≤ 1`, etc.): hoy se valida implícitamente en cada llamada.
+- **Banker's rounding en `calculate_stake`** está documentado pero conviene validar contra preferencia del usuario (`round-half-up` con `decimal`).
+- **Tests faltantes recomendados por el matemático**: monotonía (favorito → longshot decreciente), Shin con `z` analítico conocido, property-based con `hypothesis` para `sum=1` en muestras random, idempotencia del multiplicativo, dirección de Shin para 2 vías.
+- **Test integración del bankroll snapshot**: simular `/deposit` durante una corrida y verificar que los picks usan el bankroll inicial.
+
+### Siguiente sesión
+- Etapa 5: cableado pipeline → persistencia → Telegram. `run_pipeline.py --full` debe: ingerir (ya hecho) → llamar a `generate_picks_for_event` por cada evento → persistir los picks vía `PickRepo.create` → notificar vía Telegram con el formato de DESIGN.md §6. Chequear `SystemState.is_paused` al arrancar.

@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from betting_bot.ids import new_id
 from betting_bot.ingestion.schemas import (
     ApiFootballFixture,
     FixtureGoals,
@@ -19,7 +20,7 @@ from betting_bot.ingestion.schemas import (
     OddsMarket,
     OddsOutcome,
 )
-from betting_bot.persistence.models import Event, Pick
+from betting_bot.persistence.models import Event, OddsSnapshot, Pick
 
 _FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -30,8 +31,10 @@ def load_fixture_json(name: str) -> Any:
 
 
 def build_event(**overrides: Any) -> Event:
-    """Event con campos requeridos en valores dummy."""
+    """Event con campos requeridos en valores dummy.
+    """
     defaults: dict[str, Any] = {
+        "id": new_id(),
         "league_key": "soccer_epl",
         "home_team": "Arsenal",
         "away_team": "Chelsea",
@@ -112,6 +115,28 @@ def build_fixture(
             away=FixtureTeam(id=away_team_id, name=away_team),
         ),
         goals=FixtureGoals(),
+    )
+
+
+def build_odds_snapshot(
+    *,
+    event_id: str,
+    bookmaker_key: str,
+    market_key: str = "h2h",
+    outcome: str = "home",
+    price: float = 2.0,
+    line: float | None = None,
+    captured_at: datetime | None = None,
+) -> OddsSnapshot:
+    """OddsSnapshot SQLAlchemy desconectado, para tests del orchestrator."""
+    return OddsSnapshot(
+        event_id=event_id,
+        bookmaker_key=bookmaker_key,
+        market_key=market_key,
+        outcome=outcome,
+        line=line,
+        price=price,
+        captured_at=captured_at or datetime(2026, 5, 20, 22, 0, tzinfo=UTC),
     )
 
 
