@@ -66,20 +66,18 @@ def test_multiplicative_idempotent_on_fair_odds(prices: list[float]) -> None:
 # --- Shin: invariantes y dirección del sesgo --------------------------------
 
 
-# Para Shin restringimos el espacio a overrounds realistas (B ≤ 1.20). Pinnacle
-# opera ~1.02 y las casas EU blandas raramente pasan 1.10. Overrounds extremos
-# (B > 1.5) pueden requerir z > 0.5 y el bracket actual `[eps, 0.5-eps]` no
-# converge — edge descubierto por estos property tests, registrado como deuda
-# en CHANGELOG para fix en commit aparte.
-def _shin_friendly_prices(prices: list[float]) -> bool:
-    implied_sum = sum(1 / p for p in prices)
-    return 1.0 < implied_sum <= 1.20
+# Shin sólo aplica con overround positivo (B > 1). Para B ≤ 1 el fast-path
+# devuelve `pi` directamente — los property tests excluyen ese caso para
+# evitar tautologías. El bracket del solver `[eps, 0.99-eps]` cubre desde
+# Pinnacle hasta overrounds patológicos.
+def _has_overround(prices: list[float]) -> bool:
+    return sum(1 / p for p in prices) > 1.0
 
 
 @given(prices=st.lists(_price, min_size=2, max_size=4))
 @settings(suppress_health_check=[HealthCheck.filter_too_much], deadline=None)
 def test_shin_sums_to_one(prices: list[float]) -> None:
-    assume(_shin_friendly_prices(prices))
+    assume(_has_overround(prices))
     fair, _z = devig_shin(prices)
     assert abs(sum(fair) - 1.0) < 1e-8
 
@@ -89,7 +87,7 @@ def test_shin_sums_to_one(prices: list[float]) -> None:
 def test_shin_preserves_order_in_3way(prices: list[float]) -> None:
     # En h2h (3 outcomes), el favorito (menor cuota) debe seguir teniendo la
     # mayor prob fair.
-    assume(_shin_friendly_prices(prices))
+    assume(_has_overround(prices))
     assume(len(set(prices)) == 3)
     fair, _ = devig_shin(prices)
     ranked_by_price = sorted(range(3), key=lambda i: prices[i])
@@ -103,7 +101,6 @@ def test_shin_corrects_favorite_longshot_bias(prices: list[float]) -> None:
     # Cuando hay overround real (B > 1.005) y un favorito claro, Shin asigna
     # MÁS prob al favorito que el multiplicativo. Refs: Shin (1993), Štrumbelj
     # (2014), Buchdahl.
-    assume(_shin_friendly_prices(prices))
     assume(sum(1 / p for p in prices) > 1.005)
     fav_idx = min(range(3), key=lambda i: prices[i])
     assume(prices.count(prices[fav_idx]) == 1)

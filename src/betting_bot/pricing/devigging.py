@@ -32,8 +32,12 @@ def devig_multiplicative(prices: list[float]) -> list[float]:
 def devig_shin(prices: list[float], tol: float = 1e-10) -> tuple[list[float], float]:
     """Shin's de-vigging vía root-finding con `brentq`.
 
-    Devuelve `(probabilidades fair, z)` donde `z ∈ [0, 0.5)` es el parámetro de
+    Devuelve `(probabilidades fair, z)` donde `z ∈ [0, 1)` es el parámetro de
     insider trading estimado. `z=0` significa mercado justo (sin overround).
+    El bracket del solver es `[eps, 0.99 - eps]`: cubre desde mercados Pinnacle
+    (z ~0.01) hasta overrounds patológicos de casas muy malas. En la práctica
+    `z > 0.5` solo aparece con `B > ~1.5` (sum de probs implícitas), inexistente
+    en sharps reales pero alcanzable con datos sintéticos / tests aleatorios.
 
     Lanza `ValueError` si el solver no bracketea la raíz o si el invariante
     `sum(fair) == 1` se viola — esos son fallos del modelo, no datos para
@@ -61,7 +65,7 @@ def devig_shin(prices: list[float], tol: float = 1e-10) -> tuple[list[float], fl
 
     eps = 1e-12
     try:
-        z = brentq(F, eps, 0.5 - eps, xtol=tol, maxiter=200)
+        z = brentq(F, eps, 0.99 - eps, xtol=tol, maxiter=200)
     except ValueError as exc:
         raise ValueError(
             f"Shin solver did not bracket a root for prices={prices}"

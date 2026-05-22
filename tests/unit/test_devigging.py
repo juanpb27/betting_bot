@@ -89,6 +89,18 @@ def test_devig_shin_requires_at_least_two_outcomes() -> None:
         devig_shin([2.0])
 
 
+def test_devig_shin_handles_extreme_overround() -> None:
+    """Regresión: caso encontrado por hypothesis con B ≈ 1.94 (overround
+    patológico, no realista en sharps reales pero técnicamente válido).
+    Antes del fix el bracket `[eps, 0.5-eps]` no bracketeaba la raíz y se
+    levantaba ValueError. Con bracket `[eps, 0.99-eps]` converge."""
+    prices = [2.0, 2.0, 1.0625]
+    fair, z = devig_shin(prices)
+    assert abs(sum(fair) - 1.0) < 1e-8
+    assert z > 0.5  # confirma que la raíz estaba fuera del bracket viejo
+    assert all(p > 0 for p in fair)
+
+
 @pytest.mark.parametrize(
     "prices",
     [

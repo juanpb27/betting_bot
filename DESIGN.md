@@ -242,10 +242,12 @@ def devig_shin(prices: list[float], tol: float = 1e-10) -> tuple[list[float], fl
     def F(z: float) -> float:
         return sum(fair_probs_given_z(z)) - 1.0
 
-    # brentq sobre [eps, 0.5 - eps] — z=0 es el caso sin insider, z=0.5 es el upper bound teórico
+    # brentq sobre [eps, 0.99 - eps] — z=0 es el caso sin insider; z se acerca
+    # a 1 sólo con overrounds patológicos (B > 1.5), inexistentes en sharps reales
+    # pero técnicamente posibles. El bracket amplio cubre todo el rango sin costo.
     eps = 1e-12
     try:
-        z = brentq(F, eps, 0.5 - eps, xtol=tol, maxiter=200)
+        z = brentq(F, eps, 0.99 - eps, xtol=tol, maxiter=200)
     except ValueError as e:
         raise ValueError(f"Shin solver did not bracket a root for prices={prices}") from e
 
