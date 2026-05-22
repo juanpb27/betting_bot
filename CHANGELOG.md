@@ -174,6 +174,9 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/).
 - Test de TZ round-trip (`commence_time` con offset no-UTC) — flagged por TL, defer.
 - `cli/heartbeat.py`, `cli/telegram_listener.py` listados en CLAUDE.md pero ausentes — Etapa 5/8.
 
+**Nueva — descubierta por property-based testing (hypothesis):**
+- **Shin `brentq` no bracketea con overrounds extremos** (B > ~1.5, ej. `[2.0, 2.0, 1.0625]`). El bracket actual `[eps, 0.5 - eps]` asume `z < 0.5`, pero para overrounds patológicos el `z` real está fuera. No afecta producción (Pinnacle ~1.02, casas EU <1.10) pero el `ValueError` actual es genérico. Fix: ampliar bracket a `[eps, 0.99 - eps]` y/o docstring que aclare el supuesto. Los property tests filtran a `B ≤ 1.20` con `assume()` hasta que se resuelva.
+
 **Nueva — diferida a Etapa 5 (consenso TL/back-eng):**
 - **Staleness gate** en `picks.py`: filtrar snapshots con `captured_at` viejo (>`max_odds_age_minutes` de `thresholds.yaml`, ya declarado como `[pendiente]`). Hoy se usan tal cual.
 - **Dedup de snapshots por `captured_at`**: si llegan dos snapshots de la misma casa+outcome (por reintentos de ingestión), `picks.py` queda con el orden de iteración. Debe quedarse con el más reciente.
