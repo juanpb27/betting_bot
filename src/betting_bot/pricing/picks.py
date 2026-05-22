@@ -78,9 +78,10 @@ def _picks_for_market(
 
     # De-vigging del sharp → p_real por outcome.
     prices_in_order = [sharp_prices[o] for o in market.outcomes]
+    sharp_overround: float | None = None  # solo Shin lo produce
     if market.devigging_method == "shin":
         try:
-            fair_probs, _ = devig_shin(prices_in_order)
+            fair_probs, sharp_overround = devig_shin(prices_in_order)
         except ValueError:
             # Solver no converge o invariante violado → no apostar este mercado.
             return []
@@ -133,6 +134,7 @@ def _picks_for_market(
                 devigging_method=market.devigging_method,
                 comparison_book=best.bookmaker_key,
                 comparison_price=best.price,
+                sharp_overround=sharp_overround,
                 min_odds_for_value=assessment.min_odds_for_value,
                 ev_at_comparison=assessment.ev,
                 kelly_fraction=assessment.kelly_fraction,

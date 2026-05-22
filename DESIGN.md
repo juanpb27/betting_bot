@@ -65,6 +65,7 @@ CREATE TABLE picks (
     devigging_method TEXT NOT NULL,
     comparison_book TEXT NOT NULL,
     comparison_price REAL NOT NULL,
+    sharp_overround REAL,                   -- z de Shin; NULL si devigging_method != 'shin'
     min_odds_for_value REAL NOT NULL,
     ev_at_comparison REAL NOT NULL,
     kelly_fraction REAL NOT NULL,

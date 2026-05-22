@@ -118,6 +118,9 @@ def test_generates_pick_when_ev_above_min() -> None:
     assert home.stake_recommended > 0
     assert home.bankroll_at_generation == 1_000_000
     assert home.line is None
+    # Shin debe haber estimado un z > 0 con overround real (~5%).
+    assert home.sharp_overround is not None
+    assert 0 < home.sharp_overround < 0.5
 
 
 # --- Quality gates ------------------------------------------------------------
@@ -263,6 +266,8 @@ def test_uses_multiplicative_method_when_market_says_so() -> None:
     over_picks = [p for p in picks if p.outcome == "over"]
     assert len(over_picks) == 1
     assert over_picks[0].devigging_method == "multiplicative"
+    # El multiplicativo no estima z → sharp_overround debe ser None.
+    assert over_picks[0].sharp_overround is None
 
 
 def test_raises_for_unknown_devigging_method() -> None:

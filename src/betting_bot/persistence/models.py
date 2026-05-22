@@ -82,6 +82,7 @@ class Pick(Base):
     devigging_method: Mapped[str]
     comparison_book: Mapped[str]
     comparison_price: Mapped[float]
+    sharp_overround: Mapped[float | None]
     min_odds_for_value: Mapped[float]
     ev_at_comparison: Mapped[float]
     kelly_fraction: Mapped[float]
