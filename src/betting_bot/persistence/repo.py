@@ -9,7 +9,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from betting_bot.config import get_settings
-from betting_bot.persistence.models import Event, OddsSnapshot, Pick, SystemState
+from betting_bot.persistence.models import (
+    ApiQuotaLog,
+    Event,
+    OddsSnapshot,
+    Pick,
+    SystemState,
+)
 
 
 def _project_date(at: datetime) -> date:
@@ -36,6 +42,16 @@ class EventRepo:
         return self._session.execute(
             select(Event).where(Event.odds_api_id == odds_api_id)
         ).scalar_one_or_none()
+
+    def get_by_api_football_id(self, api_football_id: int) -> Event | None:
+        return self._session.execute(
+            select(Event).where(Event.api_football_id == api_football_id)
+        ).scalar_one_or_none()
+
+    def update(self, event: Event) -> Event:
+        """Persiste cambios de un Event ya presente en la sesión."""
+        self._session.flush()
+        return event
 
 
 class OddsRepo:
@@ -117,3 +133,15 @@ class SystemStateRepo:
             self._session.add(state)
             self._session.flush()
         return state
+
+
+class QuotaRepo:
+    """Acceso a `api_quota_log` — registro de consumo de cuota de las APIs."""
+
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, log: ApiQuotaLog) -> ApiQuotaLog:
+        self._session.add(log)
+        self._session.flush()
+        return log

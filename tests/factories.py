@@ -1,10 +1,32 @@
-"""Constructores de entidades para tests. Centraliza los valores dummy."""
+"""Constructores de entidades y carga de fixtures para tests."""
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
+from betting_bot.ingestion.schemas import (
+    ApiFootballFixture,
+    FixtureGoals,
+    FixtureInfo,
+    FixtureLeague,
+    FixtureStatus,
+    FixtureTeam,
+    FixtureTeams,
+    OddsApiEvent,
+    OddsBookmaker,
+    OddsMarket,
+    OddsOutcome,
+)
 from betting_bot.persistence.models import Event, Pick
+
+_FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+
+def load_fixture_json(name: str) -> Any:
+    """Carga y parsea un archivo JSON de `tests/fixtures/`."""
+    return json.loads((_FIXTURES_DIR / name).read_text(encoding="utf-8"))
 
 
 def build_event(**overrides: Any) -> Event:
@@ -44,3 +66,79 @@ def build_pick(event_id: str, **overrides: Any) -> Pick:
         "bankroll_at_generation": 2500000,
     }
     return Pick(**{**defaults, **overrides})
+
+
+def build_odds_event(
+    *,
+    home_team: str,
+    away_team: str,
+    commence_time: datetime,
+    event_id: str = "odds-evt-1",
+    bookmakers: list[OddsBookmaker] | None = None,
+) -> OddsApiEvent:
+    """Evento de the-odds-api (modelo Pydantic) para tests."""
+    return OddsApiEvent(
+        id=event_id,
+        sport_key="soccer_epl",
+        commence_time=commence_time,
+        home_team=home_team,
+        away_team=away_team,
+        bookmakers=bookmakers or [],
+    )
+
+
+def build_fixture(
+    *,
+    home_team: str,
+    away_team: str,
+    date: datetime,
+    fixture_id: int = 1,
+    home_team_id: int = 1,
+    away_team_id: int = 2,
+    league_id: int = 39,
+    season: int = 2026,
+    status_short: str = "NS",
+) -> ApiFootballFixture:
+    """Fixture de api-football (modelo Pydantic) para tests."""
+    return ApiFootballFixture(
+        fixture=FixtureInfo(
+            id=fixture_id,
+            date=date,
+            status=FixtureStatus(long="Not Started", short=status_short),
+        ),
+        league=FixtureLeague(id=league_id, name="Premier League", season=season),
+        teams=FixtureTeams(
+            home=FixtureTeam(id=home_team_id, name=home_team),
+            away=FixtureTeam(id=away_team_id, name=away_team),
+        ),
+        goals=FixtureGoals(),
+    )
+
+
+def build_h2h_bookmaker(
+    *,
+    key: str,
+    home_team: str,
+    away_team: str,
+    home_price: float = 2.0,
+    draw_price: float = 3.4,
+    away_price: float = 3.8,
+) -> OddsBookmaker:
+    """Bookmaker con un mercado h2h (modelo Pydantic) para tests."""
+    ts = datetime(2026, 5, 20, 22, 0, tzinfo=UTC)
+    return OddsBookmaker(
+        key=key,
+        title=key.capitalize(),
+        last_update=ts,
+        markets=[
+            OddsMarket(
+                key="h2h",
+                last_update=ts,
+                outcomes=[
+                    OddsOutcome(name=home_team, price=home_price),
+                    OddsOutcome(name=away_team, price=away_price),
+                    OddsOutcome(name="Draw", price=draw_price),
+                ],
+            )
+        ],
+    )

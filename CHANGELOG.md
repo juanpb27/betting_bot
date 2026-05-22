@@ -106,3 +106,32 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/).
 
 ### Siguiente sesión
 - Etapa 3: ingesta con contratos — `ingestion/schemas.py` (Pydantic), `ingestion/fixtures.py`, `ingestion/odds.py`, `ingestion/normalizer.py`, tests con los fixtures JSON capturados en Etapa 1.
+
+---
+
+## [2026-05-21] — Sesión 5: Etapa 3 completada (ingesta con contratos)
+
+### Hecho
+- `ingestion/schemas.py`: contratos Pydantic de the-odds-api (`OddsApiEvent` y anidados) y api-football (`ApiFootballResponse`/`ApiFootballFixture` y anidados), validados contra los fixtures JSON reales.
+- `ingestion/_http.py`: `request_with_retries()` (reintentos con backoff ante red/429/5xx) + DTO `QuotaInfo`.
+- `ingestion/odds.py`: `OddsApiClient` async; parsea la cuota de los headers `x-requests-remaining`/`x-requests-used`.
+- `ingestion/fixtures.py`: `ApiFootballClient` async; inspecciona `errors` del body (api-football devuelve HTTP 200 con error). `current_season()`.
+- `ingestion/normalizer.py`: `normalize_team_name()` (NFKD→ASCII, sufijos de club) y `match_events()` — cruce difuso con rapidfuzz, ventana de 6h, circuit breaker bajo 90% de confianza.
+- `cli/run_pipeline.py`: `run_ingestion()` orquesta fetch fixtures+odds en paralelo → match → upsert de `events` → `odds_snapshots` → `api_quota_log`. CLI `--ingest-only` con click. Aísla el fallo de una liga (no tumba la corrida de las demás) y cuenta los outcomes h2h no mapeados.
+- `persistence/repo.py`: `QuotaRepo`, `EventRepo.get_by_api_football_id`/`update`. `yaml_config.py`: `LeagueConfig`, `load_active_leagues`, `load_odds_bookmakers`.
+- Tests: `test_schemas.py`, `test_normalizer.py`, `test_ingestion_clients.py` (mocks con `httpx.MockTransport`), `test_run_pipeline.py`, `test_ingestion.py` (integración). `tests/factories.py` extendido con builders de modelos Pydantic y `load_fixture_json`. **73 tests unitarios + 3 de integración**, ruff y mypy limpios.
+- Revisión de tech lead aplicada: `run_ingestion` aísla el fallo por liga — un error de API en una liga (key inválida, API caída, respuesta inesperada) ya no aborta la corrida de las demás; se registra en `IngestionResult.leagues_failed` y se sigue. Más tests del caso de fallo aislado, outcome no mapeado y confianza empatada.
+
+### Decisiones tomadas
+- Solo mercado `h2h` en esta etapa: el schema deja `point`/`line` opcional, sumar totals/btts/spreads después no rompe contratos. Se prueba el pipeline completo sobre un mercado antes de ampliar.
+- Desarrollo en plan free: todo se construye y testea con fixtures+mocks. Los tests de integración corren contra las APIs reales (the-odds-api free da odds; api-football free da fixtures de 2024) — verificados, pasan.
+- Tests de integración excluidos de la corrida normal vía `addopts = -m 'not integration'`; se corren con `uv run pytest -m integration`.
+- `api_quota_log` queda con `requests_*` en `None` para api-football: `/fixtures` no expone la cuota en headers usables; no se gasta un `/status` extra.
+- Upsert de `events` por `odds_api_id` en el orquestador (no un upsert genérico en el repo). Los `odds_snapshots` se acumulan por diseño (serie temporal de cuotas).
+
+### Deuda técnica
+- **`structlog` no montado.** El pipeline (`run_ingestion`/`run_pipeline`) usa `click.echo` para el resumen; no hay logs estructurados JSON ni `request_id` por corrida, que CLAUDE.md exige para el pipeline. Hoy el detalle de ligas con fallo y eventos sin match queda visible en el resumen del CLI. Pendiente: montar structlog (processors, `request_id`, JSON renderer) — conviene hacerlo junto al deploy a systemd (Etapa 8), cuando los logs van a journald.
+- **`operation_log` no se popula.** Eventos sin match y ligas con fallo se cuentan en `IngestionResult` y se muestran en el resumen, pero no se escriben filas en la tabla `operation_log`. Pendiente para la misma tarea de observabilidad que structlog.
+
+### Siguiente sesión
+- Etapa 4: pricing — `pricing/devigging.py` (Shin con `brentq` + multiplicativo), `pricing/value.py`, `pricing/kelly.py`, con tests exhaustivos (TDD).

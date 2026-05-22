@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
@@ -27,3 +28,33 @@ def load_book_codes() -> frozenset[str]:
     if not codes:
         raise ValueError("books.yaml: no hay 'destination_books' definidas")
     return frozenset(codes)
+
+
+@dataclass(frozen=True)
+class LeagueConfig:
+    """Una liga activa: su key en the-odds-api y su id en api-football."""
+
+    key: str
+    api_football_id: int
+
+
+def load_active_leagues() -> list[LeagueConfig]:
+    """Ligas con `active: true` en config/leagues.yaml."""
+    data = load_yaml("leagues.yaml")
+    return [
+        LeagueConfig(key=lg["key"], api_football_id=lg["api_football_id"])
+        for lg in data.get("leagues", [])
+        if lg.get("active", False)
+    ]
+
+
+def load_odds_bookmakers() -> list[str]:
+    """Casas a pedir a the-odds-api: la sharp (Pinnacle) + las de comparación."""
+    data = load_yaml("books.yaml")
+    sharp = data["sharp_reference"]["key"]
+    comparison = [
+        book["key"]
+        for book in data.get("comparison_books", [])
+        if book.get("enabled", True)
+    ]
+    return [sharp, *comparison]

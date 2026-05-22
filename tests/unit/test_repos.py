@@ -6,8 +6,20 @@ from datetime import UTC, date, datetime
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from betting_bot.persistence.models import Event, OddsSnapshot, Pick, SystemState
-from betting_bot.persistence.repo import EventRepo, OddsRepo, PickRepo, SystemStateRepo
+from betting_bot.persistence.models import (
+    ApiQuotaLog,
+    Event,
+    OddsSnapshot,
+    Pick,
+    SystemState,
+)
+from betting_bot.persistence.repo import (
+    EventRepo,
+    OddsRepo,
+    PickRepo,
+    QuotaRepo,
+    SystemStateRepo,
+)
 from tests.factories import build_event, build_pick
 
 
@@ -184,3 +196,27 @@ def test_system_state_repo_is_idempotent(session: Session) -> None:
     assert first is second
     count = session.execute(select(func.count()).select_from(SystemState)).scalar()
     assert count == 1
+
+
+# --- EventRepo (Etapa 3) / QuotaRepo ------------------------------------------
+
+
+def test_event_repo_get_by_api_football_id(session: Session) -> None:
+    event = _add_event(session)
+    event.api_football_id = 1208021
+    EventRepo(session).update(event)
+    assert EventRepo(session).get_by_api_football_id(1208021) is event
+    assert EventRepo(session).get_by_api_football_id(999999) is None
+
+
+def test_quota_repo_add(session: Session) -> None:
+    log = QuotaRepo(session).add(
+        ApiQuotaLog(
+            provider="odds_api",
+            requests_remaining=499,
+            requests_used=1,
+            endpoint="/v4/sports/soccer_epl/odds/",
+        )
+    )
+    assert log.id is not None
+    assert log.provider == "odds_api"
