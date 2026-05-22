@@ -7,6 +7,8 @@ unidades enteras de la moneda del deployment (`rounding_unit` desde
 """
 from __future__ import annotations
 
+from decimal import ROUND_HALF_UP, Decimal
+
 
 def kelly_fraction(p: float, decimal_odds: float, fraction: float = 0.25) -> float:
     """Fracción del bankroll a apostar según Kelly fraccional.
@@ -38,10 +40,18 @@ def calculate_stake(
 
     Si la fracción de Kelly cae bajo `floor`, devuelve 0 (skip el pick). Si la
     supera `cap`, se trunca al cap. Redondea al múltiplo más cercano de
-    `rounding_unit`.
+    `rounding_unit` con regla **half-up** (28_500 → 29_000, no 28_000) — más
+    intuitivo que el banker's rounding del `round()` builtin para dinero, y
+    consistente con la convención contable estándar.
     """
     f = kelly_fraction(p_real, decimal_odds, fraction)
     if f < floor:
         return 0
     f = min(f, cap)
-    return round(bankroll * f / rounding_unit) * rounding_unit
+    # Decimal(str(...)) evita la imprecisión binaria de Decimal(float).
+    units = int(
+        Decimal(str(bankroll * f / rounding_unit)).quantize(
+            Decimal("1"), rounding=ROUND_HALF_UP
+        )
+    )
+    return units * rounding_unit

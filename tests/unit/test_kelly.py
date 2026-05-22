@@ -59,12 +59,19 @@ def test_calculate_stake_caps_at_cap() -> None:
     assert stake == 30_000
 
 
-def test_calculate_stake_rounds_to_rounding_unit() -> None:
-    # p=0.555, odds=2.0 → raw_kelly = 0.11, /4 = 0.0275, cap=0.03 no aplica.
-    # Stake bruto = 1_000_000 * 0.0275 = 27_500 → round(27.5)*1000.
-    # round(27.5) = 28 (banker's, 28 es par). → 28_000.
-    stake = calculate_stake(1_000_000, 0.555, 2.0, rounding_unit=1000)
-    assert stake == 28_000
+def test_calculate_stake_rounds_half_up_not_bankers() -> None:
+    # p=0.557, odds=2.0 → raw_kelly = 0.114, /4 = 0.0285, cap=0.03 no aplica.
+    # Stake bruto = 1_000_000 * 0.0285 = 28_500 → 28.5 unidades de 1k.
+    # ROUND_HALF_UP → 29_000. Banker's daría 28_000 (28 es par) — el test
+    # falla si alguien revierte a `round()` builtin.
+    stake = calculate_stake(1_000_000, 0.557, 2.0, rounding_unit=1000)
+    assert stake == 29_000
+
+
+def test_calculate_stake_rounds_half_up_below_half() -> None:
+    # Stake bruto = 27_400 → 27.4 → ROUND_HALF_UP redondea hacia 27.
+    stake = calculate_stake(1_000_000, 0.5548, 2.0, rounding_unit=1000)
+    assert stake == 27_000
 
 
 def test_calculate_stake_works_with_usd_rounding_unit_one() -> None:
