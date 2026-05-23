@@ -15,7 +15,6 @@ Nota: usamos MarkdownV2 para responses; los handlers ya escapan sus inputs.
 """
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable, Coroutine
 from typing import Any
 
@@ -27,9 +26,10 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 
 from betting_bot.bankroll.ledger import BankrollLedger
 from betting_bot.delivery import telegram_handlers as h
+from betting_bot.logging_setup import bind_request_id, get_logger
 from betting_bot.persistence.repo import PickRepo, SystemStateRepo
 
-_log = logging.getLogger(__name__)
+_log = get_logger(__name__)
 
 
 def is_authorized_chat(*, chat_id: int | None, authorized_id: int) -> bool:
@@ -83,29 +83,46 @@ def _wrap(
         if not is_authorized_chat(chat_id=chat_id, authorized_id=authorized_chat_id):
             _log.warning(
                 "unauthorized_chat",
-                extra={"chat_id": chat_id, "user_id": update.effective_user.id if update.effective_user else None},
+                chat_id=chat_id,
+                user_id=update.effective_user.id if update.effective_user else None,
+                handler=handler_fn.__name__,
             )
             return  # silencio deliberado: no confirmamos existencia al sondeo
 
-        args = context.args or []
-        session = session_factory()
-        try:
-            response = _dispatch(handler_fn, args=args, session=session)
-            session.commit()
-        except ValueError as e:
-            session.rollback()
-            response = f"ERROR: {h.escape_md(str(e))}"
-        except Exception:
-            session.rollback()
-            _log.exception("handler_failed", extra={"handler": handler_fn.__name__})
-            response = "ERROR interno\\. Ya está logueado\\."
-        finally:
-            session.close()
+        # request_id por invocación de comando: queda inyectado en toda log
+        # call del handler/wrapper a través de contextvars.
+        with bind_request_id() as request_id:
+            args = context.args or []
+            session = session_factory()
+            try:
+                response = _dispatch(handler_fn, args=args, session=session)
+                session.commit()
+                _log.info(
+                    "command_handled",
+                    handler=handler_fn.__name__,
+                    chat_id=chat_id,
+                    args_count=len(args),
+                )
+            except ValueError as e:
+                session.rollback()
+                response = f"ERROR: {h.escape_md(str(e))}"
+                _log.info(
+                    "command_rejected",
+                    handler=handler_fn.__name__,
+                    reason=str(e),
+                )
+            except Exception:
+                session.rollback()
+                _log.exception("handler_failed", handler=handler_fn.__name__)
+                response = "ERROR interno\\. Ya está logueado\\."
+            finally:
+                session.close()
 
-        if update.effective_message is not None:
-            await update.effective_message.reply_text(
-                response, parse_mode=ParseMode.MARKDOWN_V2
-            )
+            if update.effective_message is not None:
+                await update.effective_message.reply_text(
+                    response, parse_mode=ParseMode.MARKDOWN_V2
+                )
+        _ = request_id  # silencia "unused" — el valor vive en contextvars
 
     return callback
 

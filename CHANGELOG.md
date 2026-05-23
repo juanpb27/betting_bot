@@ -53,8 +53,19 @@ Antes de arrancar Etapa 6 se pidió auditoría profunda al TL y al back-engineer
 - **`cli/heartbeat.py` y `ops/systemd/*.service|*.timer`** listados en CLAUDE.md como si existieran; aún no. Aclarar en docs o moverlos a "estructura objetivo".
 - **`_run` con `is_paused`: sin test unitario** (justificado arriba, lógica trivial). Cubrir con smoke test al armar el `--full` de Etapa 6.
 
+### Mini-commit posterior (mismo día): `structlog` montado
+- `src/betting_bot/logging_setup.py` con `configure_logging()` (KV en dev, JSON en prod vía `LOG_JSON=1`) y `bind_request_id()` context manager que inyecta `request_id` en `contextvars` para que toda log call del bloque lo incluya automáticamente.
+- stdlib `logging` enrutado por el mismo `ProcessorFormatter` → httpx, telegram.ext, sqlalchemy emiten con el mismo formato que el código nuestro.
+- Call sites migrados:
+  - `cli/telegram_listener.py`: `configure_logging()` + `log.info("telegram_listener_started", ...)`.
+  - `delivery/telegram_bot.py::_wrap`: `bind_request_id()` por invocación de comando + logs estructurados (`command_handled`, `command_rejected`, `handler_failed`, `unauthorized_chat`) con `extra` reemplazado por kwargs.
+  - `cli/run_pipeline.py::_run`: `bind_request_id()` por corrida + logs `pipeline_start` / `pipeline_done` / `pipeline_aborted_paused`.
+- 6 tests en `tests/unit/test_logging_setup.py` (configuración idempotente, generación UUID, respeto a valor explícito, propagación en contextvars, limpieza post-excepción, anidación con limitación documentada).
+- 186 unit + 3 integration verdes, ruff + mypy --strict limpios.
+- **Decisión sobre anidación**: `unbind_contextvars` borra la key sin restaurar el outer (los call sites no anidan; si en el futuro hace falta, pasamos a save/restore con tokens). Documentado en el test correspondiente.
+
 ### Siguiente sesión
-- **Mini-commit: subir `structlog`** con `request_id` propagado, formatters estructurados (KV en dev, JSON-ready en prod), y `extra={...}` reemplazado por kwargs estructurados en todos los call sites.
+- **Etapa 6**: `delivery/sheets_sync.py` (gspread, write a hojas "Picks"/"Movements"/"Bankroll"), `delivery/telegram_picks.py` con notificación + `ConversationHandler` wizard, wiring `run_pipeline --full` (ingestion → `generate_picks_for_event` → `PickRepo.create` → notify → sheets sync), `PickRepo.mark_placed/mark_skipped` con TDD strict.
 - **Etapa 6**: `delivery/sheets_sync.py` (gspread, write a hojas "Picks"/"Movements"/"Bankroll"), `delivery/telegram_picks.py` con notificación + `ConversationHandler` wizard, wiring `run_pipeline --full` (ingestion → `generate_picks_for_event` → `PickRepo.create` → notify → sheets sync), `PickRepo.mark_placed/mark_skipped` con TDD strict.
 
 ---

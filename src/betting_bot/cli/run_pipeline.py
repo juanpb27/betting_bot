@@ -22,6 +22,7 @@ from betting_bot.ingestion.fixtures import (
 from betting_bot.ingestion.normalizer import match_events
 from betting_bot.ingestion.odds import OddsApiClient, OddsApiError
 from betting_bot.ingestion.schemas import OddsApiEvent
+from betting_bot.logging_setup import bind_request_id, configure_logging, get_logger
 from betting_bot.persistence.db import session_scope
 from betting_bot.persistence.models import ApiQuotaLog, Event, OddsSnapshot
 from betting_bot.persistence.repo import EventRepo, OddsRepo, QuotaRepo, SystemStateRepo
@@ -33,6 +34,7 @@ from betting_bot.yaml_config import (
 )
 
 _H2H = "h2h"
+_log = get_logger(__name__)
 
 
 @dataclass
@@ -183,34 +185,52 @@ async def run_ingestion(
 
 
 async def _run() -> None:
-    with session_scope() as session:
-        state = SystemStateRepo(session).get()
-        if state.is_paused:
-            click.echo(
-                f"Sistema PAUSADO ({state.paused_reason or 'sin razón'}). "
-                f"Usa /resume para reanudar."
-            )
-            return
-
-    settings = get_settings()
-    leagues = load_active_leagues()
-    bookmakers = load_odds_bookmakers()
-    matching = load_yaml("thresholds.yaml")["matching"]
-
-    async with httpx.AsyncClient() as http:
-        odds_client = OddsApiClient(http, settings.odds_api_key)
-        fixtures_client = ApiFootballClient(http, settings.api_football_key)
+    with bind_request_id() as request_id:
         with session_scope() as session:
-            result = await run_ingestion(
-                session=session,
-                odds_client=odds_client,
-                fixtures_client=fixtures_client,
-                leagues=leagues,
-                bookmakers=bookmakers,
-                season=current_season(),
-                min_confidence=float(matching["min_team_match_confidence"]),
-                time_window_hours=float(matching["time_window_hours"]),
-            )
+            state = SystemStateRepo(session).get()
+            if state.is_paused:
+                _log.warning(
+                    "pipeline_aborted_paused",
+                    paused_reason=state.paused_reason,
+                    paused_at=state.paused_at.isoformat() if state.paused_at else None,
+                )
+                click.echo(
+                    f"Sistema PAUSADO ({state.paused_reason or 'sin razón'}). "
+                    f"Usa /resume para reanudar."
+                )
+                return
+
+        settings = get_settings()
+        leagues = load_active_leagues()
+        bookmakers = load_odds_bookmakers()
+        matching = load_yaml("thresholds.yaml")["matching"]
+
+        _log.info("pipeline_start", leagues=len(leagues), bookmakers=len(bookmakers))
+
+        async with httpx.AsyncClient() as http:
+            odds_client = OddsApiClient(http, settings.odds_api_key)
+            fixtures_client = ApiFootballClient(http, settings.api_football_key)
+            with session_scope() as session:
+                result = await run_ingestion(
+                    session=session,
+                    odds_client=odds_client,
+                    fixtures_client=fixtures_client,
+                    leagues=leagues,
+                    bookmakers=bookmakers,
+                    season=current_season(),
+                    min_confidence=float(matching["min_team_match_confidence"]),
+                    time_window_hours=float(matching["time_window_hours"]),
+                )
+
+        _log.info(
+            "pipeline_done",
+            leagues_processed=result.leagues_processed,
+            leagues_failed=len(result.leagues_failed),
+            events_ingested=result.events_ingested,
+            events_skipped=result.events_skipped,
+            odds_snapshots=result.odds_snapshots,
+        )
+        _ = request_id  # silencia "unused" — el valor vive en contextvars
     _print_summary(result)
 
 
@@ -238,6 +258,7 @@ def _print_summary(result: IngestionResult) -> None:
 )
 def main(ingest_only: bool) -> None:  # noqa: ARG001 — placeholder hasta Etapa 6
     """Corre el pipeline. Hoy: solo ingestion. Etapa 6 sumará pricing + notify."""
+    configure_logging(level=get_settings().log_level)
     asyncio.run(_run())
 
 

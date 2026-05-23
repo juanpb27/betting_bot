@@ -9,7 +9,6 @@ salir.
 """
 from __future__ import annotations
 
-import logging
 import sys
 
 from pydantic import ValidationError
@@ -18,6 +17,7 @@ from sqlalchemy import create_engine
 
 from betting_bot.config import get_settings
 from betting_bot.delivery.telegram_bot import build_application
+from betting_bot.logging_setup import configure_logging, get_logger
 from betting_bot.persistence.db import apply_sqlite_pragmas, resolve_database_url
 
 console = Console()
@@ -33,10 +33,8 @@ def main() -> None:
             console.print(f"  • [yellow]{field_name}[/yellow]: {err['msg']}")
         sys.exit(1)
 
-    logging.basicConfig(
-        level=settings.log_level,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
+    configure_logging(level=settings.log_level)
+    log = get_logger(__name__)
 
     engine = create_engine(resolve_database_url())
     apply_sqlite_pragmas(engine)
@@ -51,6 +49,7 @@ def main() -> None:
         f"[bold green]Bot iniciado.[/bold green] Autorizado chat_id="
         f"[cyan]{settings.telegram_chat_id}[/cyan]. Ctrl+C para salir."
     )
+    log.info("telegram_listener_started", authorized_chat_id=settings.telegram_chat_id)
     # Bloqueante. Polling = no necesita IP pública ni webhook.
     # drop_pending_updates: descarta mensajes acumulados mientras el bot estuvo
     # offline. Sin esto, al arrancar procesaría el backlog completo (típicamente
