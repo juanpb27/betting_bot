@@ -129,7 +129,8 @@ def test_odds_repo_add_many(session: Session) -> None:
 def test_pick_repo_create_sets_generated_fields(session: Session) -> None:
     event = _add_event(session)
     at = datetime(2026, 5, 20, 12, 0, tzinfo=UTC)
-    pick = PickRepo(session).create(_build_pick(event.id), generated_at=at)
+    pick, is_new = PickRepo(session).create(_build_pick(event.id), generated_at=at)
+    assert is_new is True
     assert pick.generated_at == at
     assert pick.generated_date == date(2026, 5, 20)
 
@@ -138,7 +139,7 @@ def test_pick_repo_generated_date_uses_project_timezone(session: Session) -> Non
     event = _add_event(session)
     # 02:00 UTC del 21 = 21:00 del 20 en America/Bogota (UTC-5).
     at = datetime(2026, 5, 21, 2, 0, tzinfo=UTC)
-    pick = PickRepo(session).create(_build_pick(event.id), generated_at=at)
+    pick, _ = PickRepo(session).create(_build_pick(event.id), generated_at=at)
     assert pick.generated_date == date(2026, 5, 20)
 
 
@@ -146,8 +147,10 @@ def test_pick_repo_create_is_idempotent_same_day(session: Session) -> None:
     event = _add_event(session)
     repo = PickRepo(session)
     at = datetime(2026, 5, 20, 12, 0, tzinfo=UTC)
-    first = repo.create(_build_pick(event.id, "h2h", "home", None), generated_at=at)
-    second = repo.create(_build_pick(event.id, "h2h", "home", None), generated_at=at)
+    first, first_new = repo.create(_build_pick(event.id, "h2h", "home", None), generated_at=at)
+    second, second_new = repo.create(_build_pick(event.id, "h2h", "home", None), generated_at=at)
+    assert first_new is True
+    assert second_new is False  # contrato del tuple
     assert first.id == second.id
     count = session.execute(select(func.count()).select_from(Pick)).scalar()
     assert count == 1
@@ -157,8 +160,8 @@ def test_pick_repo_idempotency_handles_null_line(session: Session) -> None:
     event = _add_event(session)
     repo = PickRepo(session)
     at = datetime(2026, 5, 20, 12, 0, tzinfo=UTC)
-    a = repo.create(_build_pick(event.id, "h2h", "home", None), generated_at=at)
-    b = repo.create(_build_pick(event.id, "h2h", "home", None), generated_at=at)
+    a, _ = repo.create(_build_pick(event.id, "h2h", "home", None), generated_at=at)
+    b, _ = repo.create(_build_pick(event.id, "h2h", "home", None), generated_at=at)
     assert a.id == b.id
 
 
@@ -166,8 +169,8 @@ def test_pick_repo_distinct_lines_are_separate_picks(session: Session) -> None:
     event = _add_event(session)
     repo = PickRepo(session)
     at = datetime(2026, 5, 20, 12, 0, tzinfo=UTC)
-    over = repo.create(_build_pick(event.id, "totals", "over", 2.5), generated_at=at)
-    under = repo.create(_build_pick(event.id, "totals", "over", 3.5), generated_at=at)
+    over, _ = repo.create(_build_pick(event.id, "totals", "over", 2.5), generated_at=at)
+    under, _ = repo.create(_build_pick(event.id, "totals", "over", 3.5), generated_at=at)
     assert over.id != under.id
 
 

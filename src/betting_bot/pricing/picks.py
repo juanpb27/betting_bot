@@ -18,7 +18,8 @@ from betting_bot.yaml_config import MarketConfig, QualityGates, StakingConfig
 # Mercados cuyo `Pick.line` queda en NULL (no tienen línea propia). Otros mercados
 # (totals, spreads) requieren `line` desde el snapshot; el orchestrator todavía
 # no lo cablea — falla loud antes que generar picks colapsados por el índice único.
-_MARKETS_WITHOUT_LINE = frozenset({"h2h", "btts"})
+SUPPORTED_MARKET_KEYS = frozenset({"h2h", "btts"})
+_MARKETS_WITHOUT_LINE = SUPPORTED_MARKET_KEYS  # alias para legibilidad interna
 
 
 def generate_picks_for_event(

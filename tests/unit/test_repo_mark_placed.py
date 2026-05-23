@@ -28,7 +28,7 @@ def _create_pending_pick(session: Session) -> str:
     session.flush()
     repo = PickRepo(session)
     pick = build_pick(event_id=event.id)
-    created = repo.create(pick, generated_at=datetime.now(UTC))
+    created, _ = repo.create(pick, generated_at=datetime.now(UTC))
     return created.id
 
 

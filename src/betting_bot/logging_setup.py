@@ -2,12 +2,38 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Iterator
+import re
+from collections.abc import Iterator, MutableMapping
 from contextlib import contextmanager
 from typing import Any
 from uuid import uuid4
 
 import structlog
+
+# Patrones de credenciales que enmascaramos en cualquier log antes del render.
+_SECRET_PATTERNS = [
+    (re.compile(r"(apiKey=)[^&\s]+", re.IGNORECASE), r"\1***REDACTED***"),
+    (re.compile(r"(api_key=)[^&\s]+", re.IGNORECASE), r"\1***REDACTED***"),
+    (re.compile(r"(/bot)\d+:[\w-]+", re.IGNORECASE), r"\1***REDACTED***"),
+    (re.compile(r"(x-apisports-key:?\s*)[\w-]+", re.IGNORECASE), r"\1***REDACTED***"),
+]
+
+
+def _scrub_secrets(
+    _logger: Any, _method: str, event_dict: MutableMapping[str, Any]
+) -> MutableMapping[str, Any]:
+    """Procesador structlog: enmascara API keys / bot tokens en cualquier
+    string del event_dict antes del render.
+    """
+    for key, value in event_dict.items():
+        if not isinstance(value, str):
+            continue
+        scrubbed = value
+        for pattern, replacement in _SECRET_PATTERNS:
+            scrubbed = pattern.sub(replacement, scrubbed)
+        if scrubbed != value:
+            event_dict[key] = scrubbed
+    return event_dict
 
 
 def configure_logging(*, level: str = "INFO", json_output: bool | None = None) -> None:
@@ -24,6 +50,7 @@ def configure_logging(*, level: str = "INFO", json_output: bool | None = None) -
         structlog.processors.TimeStamper(fmt="iso", utc=True),
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
+        _scrub_secrets,
     ]
 
     renderer: structlog.types.Processor = (

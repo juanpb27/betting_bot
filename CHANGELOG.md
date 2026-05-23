@@ -3,6 +3,126 @@
 Todos los cambios significativos del proyecto se registran aquí.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/).
 
+## [2026-05-23] — Sesión 10: Etapa 6 cierre (pasos 8-13)
+
+### Hecho
+- **Paso 8 — `delivery/pick_wizard.py`** (TDD strict para pure parts): parsers
+  (`parse_book_callback`, `parse_reason_callback`), validators (`validate_price`
+  acepta `2,30` latam; `validate_stake` regex `^\d+(?:[.,]\d{3})*$` que rechaza
+  decimales reales como `10.5` pero acepta agrupados `25.000`), keyboards
+  (`build_book_keyboard` desde `load_destination_books()`, `build_skip_reason_keyboard`
+  con 4 motivos predefinidos), y operaciones atómicas `atomic_place_pick` /
+  `atomic_skip_pick` que encadenan `mark_placed`/`mark_skipped` + `record_bet_stake`
+  + 2 enqueues a Sheets sync EN LA MISMA SESIÓN (el caller commitea o rollbackea
+  todo atómicamente). 20 tests (incluido test con 2 sesiones que valida rollback
+  ante overdraw).
+- **Paso 9 — Wiring async `ConversationHandler`**: 5 estados (CHOOSING_BOOK,
+  ENTERING_PRICE, ENTERING_STAKE, CONFIRMING, CHOOSING_REASON) + entry handler
+  `_entry_pick_action` que parsea `pa:<action>:<pick_id>` y enruta. Handler de
+  TIMEOUT (`ConversationHandler.TIMEOUT`) que notifica al usuario que el
+  wizard expiró y el pick sigue pendiente. `conversation_timeout=600s`,
+  fallback `/cancel`. Cada state handler usa `_wrap_state` que inyecta
+  `session_factory` + `bind_request_id`. 4 tests smoke con AsyncMock.
+- **Paso 10 — Registrar wizard** en `telegram_bot.build_application` después
+  de los CommandHandlers. Conviven sin conflicto (pattern filter `^pa:` y
+  `^wz:` aíslan callbacks de los comandos).
+- **Paso 11 — `cli/run_pipeline --full`**: nueva función
+  `run_pricing_and_notify(session, events, bot, chat_id) -> PricingResult`.
+  Lee bankroll snapshot único al inicio (decisión E4). Filtra `markets` a
+  `SUPPORTED_MARKET_KEYS = {h2h, btts}` con log warning de los excluidos
+  (totals, spreads que están enabled en yaml pero requieren `line` —
+  Fase 2). Para cada pick: `PickRepo.create` (idempotente) → si nuevo,
+  encola Sheets + notifica Telegram. Bot standalone con `Bot(token)`
+  (procesos pipeline y listener son distintos pero comparten el mismo bot
+  token). Notify falla → log + continue (los picks ya están persistidos +
+  encolados; el usuario puede recibir el mensaje en próxima corrida). 5
+  tests de integración (happy, idempotente, bankroll cero, telegram OK,
+  telegram falla).
+- **Paso 12 — Smoke E2E manual** documentado abajo en "Cómo probar"; el
+  usuario lo correrá manualmente para cerrar la etapa formalmente.
+- **Paso 13 — Este CHANGELOG**.
+
+### Fixes aplicados pre-cierre (auditoría TL + qa final)
+- **C1 crítico (TL)**: `_run` con `--full` recibía TODOS los events con
+  snapshots históricos (re-procesaba en corridas N>1). Fix: `IngestionResult`
+  ahora expone `event_ids_touched: set[str]` que se popula en `run_ingestion`;
+  el caller filtra solo a esos.
+- **I1 (TL)**: `PickRepo.create` ahora devuelve `tuple[Pick, bool]` (`(pick,
+  is_new)`) en vez de depender del contrato implícito "is_new ⇔ created is
+  pick". Migrados 8 callers en tests + 1 en run_pipeline.
+- **I2 (TL)**: agregado handler `_handle_timeout` para
+  `ConversationHandler.TIMEOUT` que notifica al usuario que el wizard expiró
+  y el pick sigue pendiente.
+- **I3 (TL)**: type checks exactos en `_handle_confirmed` (`type(stake) is
+  not int` para que `bool` no pase como `int`).
+- **QA bloqueante**: agregados 4 tests del entry async (`_entry_pick_action`)
+  con AsyncMock — cubren ramas `placed`, `skip`, `details`, callback inválido.
+
+### Decisiones tomadas
+- **`SUPPORTED_MARKET_KEYS` filter + log warning** (en vez de
+  `NotImplementedError` preemptive del orchestrator): no aborta corrida válida
+  por configuración heredada; la deuda queda visible en logs estructurados.
+- **`PickRepo.create` API tupla**: elimina ambigüedad. Convención
+  Django/SQLAlchemy `get_or_create`. Cambio de firma pero migración trivial.
+- **Bot standalone para el pipeline**: `Bot(token)` solo manda mensajes (POST
+  `/sendMessage`), no consume updates. El listener (proceso aparte) corre la
+  Application con `getUpdates`. Comparten token → Telegram entrega los
+  callbacks al listener (único consumidor). Coherente para el deploy
+  systemd-driven (Etapa 10).
+- **Atomicidad wizard via `atomic_place_pick`**: encapsula `mark_placed +
+  record_bet_stake + enqueue pick + enqueue movement` en la misma sesión.
+  Caller (`_handle_confirmed`) hace `session_scope` + commit; ante excepción,
+  rollback global. UPDATE condicional en `mark_placed` cierra el race de
+  doble-click; combinado con `edit_message_reply_markup(reply_markup=None)`
+  tras cada interacción del wizard, el user no puede generar dos
+  `atomic_place_pick` para el mismo pick.
+
+### Deuda técnica (nueva, diferida con razón)
+- **Wizard async wiring sin coverage completo**: 4 tests del entry +
+  `_handle_*` pure. Faltan tests de transiciones completas (chose_book →
+  entered_price → entered_stake → confirmed) y de `/cancel` desde cada
+  estado. El flujo end-to-end se valida con smoke manual; tests
+  automatizados completos = Etapa 7/8.
+- **`run_ingestion` upsert parcial**: si un evento ya existe y `commence_time`/
+  `status`/nombres cambian, solo se actualiza `api_football_id`. BUG-4 ya
+  flagueado por back-eng en sesión previa. Fix antes de operar con plata real.
+- **`league_key` crudo en mensajes Telegram y Sheets** (`soccer_epl` vs
+  "Premier League"): pendiente prettify desde `leagues.yaml`.
+- **`PickRepo.get_with_event` se llama 1 vez por pick en el worker**: si una
+  corrida genera 50 picks, son 50 JOINs. Aceptable para volumen Fase 1; si
+  crece, batch-load con `IN`.
+- **Bot standalone NO se cierra explícitamente** (sin `await bot.shutdown()`
+  ni context manager). En PTB v21 puede dejar conexiones HTTPX colgadas.
+  Fix junto con structlog correlation en Etapa 8.
+- **Sin healthcheck de escritura a Sheets**: el `check_google_sheets` actual
+  solo prueba lectura. Si los permisos cambian a "Viewer", el smoke pasa
+  pero `sheets_worker` falla. Diferido a Etapa 10.
+- **Bot warning `per_message=False`** de PTB v21: warning informativo (no
+  bug); el mix de Message + Callback handlers en distintos estados es
+  intencional. Acepto el ruido.
+- **`validate_price("1,500")` returns `1.5`** (replace `,` → `.`):
+  semánticamente ambiguo (¿separador de miles o decimal?). Ninguna casa real
+  paga cuotas tan altas como para que importe; documentado.
+- **`_atomic_place_pick` no valida `actual_book` contra `books.yaml`**: lo
+  asume validado por el wizard (que sí lo valida en `_handle_chose_book`).
+  Documentado en el docstring.
+
+### Lo bien hecho (validado por TL final)
+- **Atomicidad wizard**: `atomic_place_pick` con sesión inyectada + UPDATE
+  condicional en `mark_placed` + `edit_message_reply_markup` cubre cross-tabla
+  y race de doble-click. Imposible doble-stake.
+- **`SUPPORTED_MARKET_KEYS` filter + log warning**: mejor que el raise
+  preemptive previo. No aborta corridas válidas.
+- **`test_run_pricing_continues_if_telegram_fails`**: cubre explícitamente
+  "Telegram caído ≠ picks perdidos". Diferencia un sistema serio de uno
+  frágil.
+
+### Siguiente sesión
+- **Etapa 7**: refresh polling con `systemd timers`, manejo robusto de
+  errores acumulados, auto-pausa por drawdown.
+
+---
+
 ## [2026-05-23] — Sesión 9: Etapa 6 (parcial — pasos 1-7 de 13)
 
 ### Hecho

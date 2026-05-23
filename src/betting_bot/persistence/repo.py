@@ -84,8 +84,20 @@ class PickRepo:
     def __init__(self, session: Session) -> None:
         self._session = session
 
-    def create(self, pick: Pick, *, generated_at: datetime | None = None) -> Pick:
+    def create(
+        self, pick: Pick, *, generated_at: datetime | None = None
+    ) -> tuple[Pick, bool]:
         """Inserta un pick de forma idempotente.
+
+        Devuelve `(pick, is_new)`:
+        - `is_new=True` → era nuevo, se insertó (el pick recibido tiene id asignado).
+        - `is_new=False` → ya existía un duplicado por (event_id, market_key,
+          outcome, line, generated_date); el pick devuelto es el existente
+          (objeto distinto al recibido), el caller no debe re-notificar.
+
+        La tupla evita un contrato implícito ("el id está seteado solo si
+        es nuevo"): callers como `run_pricing_and_notify` necesitan saber
+        si debe encolar y notificar.
         """
         at = generated_at or datetime.now(UTC)
         pick.generated_at = at
@@ -93,11 +105,11 @@ class PickRepo:
 
         existing = self._find_duplicate(pick)
         if existing is not None:
-            return existing
+            return existing, False
 
         self._session.add(pick)
         self._session.flush()
-        return pick
+        return pick, True
 
     def _find_duplicate(self, pick: Pick) -> Pick | None:
         line_filter = Pick.line.is_(None) if pick.line is None else Pick.line == pick.line

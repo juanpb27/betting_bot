@@ -56,6 +56,44 @@ def test_bind_request_id_clears_on_exit_even_after_exception() -> None:
     assert "request_id" not in ctx
 
 
+def test_scrub_secrets_masks_apikey_in_url() -> None:
+    from betting_bot.logging_setup import _scrub_secrets
+    event = {
+        "event": "HTTP Request",
+        "url": "https://api.the-odds-api.com/v4/sports/x/odds/?apiKey=abc123def&regions=eu",
+    }
+    out = _scrub_secrets(None, "info", dict(event))
+    assert "abc123def" not in out["url"]
+    assert "***REDACTED***" in out["url"]
+    assert "regions=eu" in out["url"]  # otros params preservados
+
+
+def test_scrub_secrets_masks_telegram_bot_token() -> None:
+    from betting_bot.logging_setup import _scrub_secrets
+    event = {
+        "event": "POST",
+        "url": "https://api.telegram.org/bot1234567890:AAH-fake-token/sendMessage",
+    }
+    out = _scrub_secrets(None, "info", dict(event))
+    assert "1234567890:AAH-fake-token" not in out["url"]
+    assert "/bot***REDACTED***" in out["url"]
+
+
+def test_scrub_secrets_masks_api_sports_key_header() -> None:
+    from betting_bot.logging_setup import _scrub_secrets
+    event = {"event": "h", "headers": "x-apisports-key: super-secret-xyz"}
+    out = _scrub_secrets(None, "info", dict(event))
+    assert "super-secret-xyz" not in out["headers"]
+    assert "***REDACTED***" in out["headers"]
+
+
+def test_scrub_secrets_leaves_non_strings_alone() -> None:
+    from betting_bot.logging_setup import _scrub_secrets
+    event = {"count": 42, "items": [1, 2, 3], "ok": True}
+    out = _scrub_secrets(None, "info", dict(event))
+    assert out == event
+
+
 def test_bind_request_id_inner_replaces_outer_then_inner_clears() -> None:
     # `unbind_contextvars` borra la key sin restaurar el valor exterior. Es
     # un trade-off conocido — los call sites del proyecto NO anidan request_id

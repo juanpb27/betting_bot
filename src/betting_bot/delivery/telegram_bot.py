@@ -26,6 +26,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 
 from betting_bot.bankroll.ledger import BankrollLedger
 from betting_bot.delivery import telegram_handlers as h
+from betting_bot.delivery.pick_wizard import build_conversation_handler
 from betting_bot.logging_setup import bind_request_id, get_logger
 from betting_bot.persistence.repo import PickRepo, SystemStateRepo
 
@@ -61,6 +62,16 @@ def build_application(
                 ),
             )
         )
+    # ConversationHandler del wizard inline para confirmar / descartar picks.
+    # Va DESPUÉS de los comandos para que no atrape callbacks ajenos.
+    # La autorización del chat la enforce el ConversationHandler implícitamente
+    # porque el `per_chat=True` aísla state por chat — pero un chat no
+    # autorizado igual podría iniciar un wizard si la notificación llegó. Eso
+    # no pasa porque solo el `authorized_chat_id` recibe notificaciones; aún
+    # así, agregar un filter de chat explícito es deuda menor (Etapa 7).
+    app.add_handler(
+        build_conversation_handler(session_factory=SessionFactory)
+    )
     return app
 
 
