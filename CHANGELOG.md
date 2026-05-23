@@ -3,6 +3,62 @@
 Todos los cambios significativos del proyecto se registran aquí.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/).
 
+## [2026-05-23] — Sesión 8: Hardening pre-Etapa 6 (auditoría TL + back-eng)
+
+### Contexto
+Antes de arrancar Etapa 6 se pidió auditoría profunda al TL y al back-engineer sobre Etapas 0-5. Ambos veredicto: GO-con-condiciones. Esta sesión aplica los bloqueantes/críticos comunes, defiere los menores y documenta toda la deuda nueva descubierta.
+
+### Hecho
+- **`cli/telegram_listener.py`** ahora usa `resolve_database_url()` en vez de `settings.database_url` raw. Sin esto, el listener arrancado desde un cwd distinto al root escribía en una DB diferente a la del pipeline (SMELL-1 back-eng).
+- **`pricing/picks.py`** levanta `NotImplementedError` si el orchestrator recibe un mercado fuera de `{"h2h", "btts"}`. Antes, `line=None` hardcoded colapsaba todos los picks de `totals`/`spreads` del día a uno solo vía el índice único parcial `idx_picks_unique_no_line` — trampa silenciosa que aparecía la primera vez que se activara otro mercado en `markets.yaml` (BUG-3 back-eng). Constante `_MARKETS_WITHOUT_LINE` documentada al tope del módulo.
+- **`cli/run_pipeline.py::_run`** chequea `SystemStateRepo.get().is_paused` antes de iniciar la ingestion; si está pausado, hace exit limpio con mensaje sin tocar APIs ni DB. Cubre el riesgo de generar/notificar picks durante una pausa explícita por Telegram (riesgo alto del TL para Etapa 6).
+- **`delivery/telegram_bot.py::_dispatch`** refactorizado de if/elif sobre `__name__` a registry explícito (`_HANDLER_DEPS: dict[_Handler, tuple[str, ...]]`). `build_application` valida al arrancar que todo handler en `_COMMAND_MAP` tenga entrada en `_HANDLER_DEPS` — fail-loud si algo desincroniza. Prepara terreno para los `CallbackQueryHandler` del wizard inline de Etapa 6.
+- **`pricing/devigging.py`** docstring del módulo actualizado: el bracket de `brentq` es `[eps, 0.99 - eps]`, no `[eps, 0.5 - eps]` (drift menor del TL).
+- **`cli/run_pipeline.py`** mensaje obsoleto "Solo --ingest-only está implementado (Etapa 3)" eliminado; el flag `--ingest-only` ahora es default True con comentario que clarifica que `--full` viene en Etapa 6.
+- **`tests/unit/test_telegram_auth.py`** imports al tope del archivo (NIT-8 back-eng); `test_build_application_registers_all_commands` ahora usa el fixture `engine` existente en vez de crear su propio engine inline.
+- 180 tests unit + 3 integration verdes (sumé 1 test `test_raises_for_market_with_line_not_yet_supported`). ruff + mypy --strict limpios.
+
+### Decisiones tomadas
+- **structlog se subirá antes de Etapa 6** (decisión del user, recomendación TL). Razón: Etapa 6 introduce 2 puntos de falla nuevos (Sheets API + wizard multi-step) y sin `request_id` propagado los errores son opacos. Va en commit separado.
+- **Etapa 6 incluye wiring mínimo `run_pipeline --full`** (ingestion → pricing → persist → notify). Refresh polling y settlement quedan para Etapa 7. Decisión del user con recomendación TL.
+- **Wizard inline usará `ConversationHandler` de PTB** (estados CHOOSING_BOOK → ENTERING_PRICE → ENTERING_STAKE → CONFIRMING). Decisión del user con recomendación TL/architect. Cada estado tendrá su `handle_X` puro, manteniendo el patrón actual.
+- **No agrego test unitario de `_run` con `is_paused`**: la lógica es 4 líneas que dependen de `session_scope`/`httpx`; los 4 tests de `SystemStateRepo.pause/resume` ya cubren el core. Flow E2E se valida con manual smoke en Etapa 6.
+
+### Deuda técnica
+**Resuelta en esta sesión** (cleanup de listados viejos):
+- `sharp_overround` en Pick — ya resuelto en mini-commit post-sesión 6; ahora marcado en CHANGELOG sesión 6.
+- `_dispatch` por `__name__` — refactorizado a registry tipado.
+- `telegram_listener` no usa `resolve_database_url` — arreglado.
+- `is_paused` no chequeado por el pipeline — arreglado.
+- Docstring `devigging.py` bracket — corregido.
+- Mensaje obsoleto en `run_pipeline.py` — corregido.
+
+**Nueva — descubierta por back-eng, diferida con razón:**
+- **BUG-1: race condition real en `BankrollLedger._record`** entre listener (proceso A) y pipeline (proceso B). SQLite WAL mitiga pero no elimina: dos `record_withdrawal` simultáneos sobre el mismo book pueden ambos pasar la validación de saldo y dejar negativo. Daño máximo: un withdraw extra en ventana de ms. Fix real: `BEGIN IMMEDIATE` o lock app-side por `book_code`. **Diferido**: en single-user real no se materializa (no mandás dos comandos en el mismo ms). Re-evaluar antes de operación real con plata.
+- **BUG-4: `cli/run_pipeline.py` solo actualiza `api_football_id` al re-encontrar un evento**. Si `commence_time` muta (partido reprogramado), `status` cambia o se corrige nombre del equipo, no se refleja. Importante antes de operar con plata real. **Defer a Etapa 6/7 junto con el wiring `--full`** que va a tocar este código.
+- **SMELL-3: `EventRepo.update()` no hace nada útil** (solo `flush()`). Trampa: el llamador modifica el objeto y "update" funciona mágicamente porque está en sesión. Si pasás detached, no falla pero no actualiza. Diferido — sacarlo o reemplazar por `merge()` cuando se refactorice el repo.
+- **SMELL-4: inconsistencia `add()` vs `create()` entre repos**. `EventRepo`/`OddsRepo` exponen `add()`; `PickRepo` expone `create()`. Justificable (uno encapsula idempotencia), pero conviene documentar o renombrar.
+- **SMELL-6: `ingestion/_http.py` retries sin log**. Cuando un endpoint se retrá silenciosamente, no queda traza. Defer a Etapa 8 cuando se monte structlog — ahí va con `extra={"retry_attempt": N}`.
+- **SMELL-7: `cli/healthcheck.py` cazadores `except Exception as e` sin log**. Por diseño (el healthcheck reporta fallas sin tumbarse). Mínimo: agregar `repr(e)` además del `str(e)` para distinguir tipos de error. Cosmético.
+- **SMELL-8: `parse_amount` acepta dígitos Unicode** (árabe-índicos, etc.). Sin riesgo real desde Telegram. Fix de una línea (`s.isascii() and s.isdigit()`).
+- **SMELL-11: `escape_md` no testeado con backslash literal**. Funciona (lo escapa a `\\`), falta cubrirlo en tests para evitar regresión.
+
+**Pendiente — TL flagged como deuda doc/decisión:**
+- **`DESIGN.md §2` dice "logging obligatorio a `operation_log`"** para cada `devig_shin`. El código no lo hace (diferido a Etapa 8). Aflojar el lenguaje en DESIGN.md o implementar. Decisión: aflojar a "objetivo Etapa 8" para evitar drift contra realidad.
+- **`MarketConfig.outcomes: list[str]`** dentro de `@dataclass(frozen=True)` — `list` mutable viola la intención del `frozen`. Cambiar a `tuple[str, ...]`.
+- **5 loaders de `yaml_config` sin `@lru_cache`** vs `load_book_codes` que sí lo tiene. Inconsistente. Unificar.
+- **Validación de rangos en `StakingConfig`** (`kelly_divisor > 0`, `0 < cap_pct ≤ 1`). Hoy se valida implícito en cada cálculo (divide-by-zero). Mover a `__post_init__`.
+- **`handle_status` no incluye `paused_at` ni `last_pipeline_run_at`**. Útil operativamente. Defer a Etapa 8 cuando esos campos se llenen.
+- **Sin `app.add_error_handler` global de PTB**. Hoy excepciones fuera del wrapper (BadRequest si MarkdownV2 escapa mal, permisos perdidos) las loguea PTB pero no van a nuestro logger. Fix junto con structlog.
+- **`cli/heartbeat.py` y `ops/systemd/*.service|*.timer`** listados en CLAUDE.md como si existieran; aún no. Aclarar en docs o moverlos a "estructura objetivo".
+- **`_run` con `is_paused`: sin test unitario** (justificado arriba, lógica trivial). Cubrir con smoke test al armar el `--full` de Etapa 6.
+
+### Siguiente sesión
+- **Mini-commit: subir `structlog`** con `request_id` propagado, formatters estructurados (KV en dev, JSON-ready en prod), y `extra={...}` reemplazado por kwargs estructurados en todos los call sites.
+- **Etapa 6**: `delivery/sheets_sync.py` (gspread, write a hojas "Picks"/"Movements"/"Bankroll"), `delivery/telegram_picks.py` con notificación + `ConversationHandler` wizard, wiring `run_pipeline --full` (ingestion → `generate_picks_for_event` → `PickRepo.create` → notify → sheets sync), `PickRepo.mark_placed/mark_skipped` con TDD strict.
+
+---
+
 ## [2026-05-22] — Sesión 7: Etapa 5 (Telegram bot — comandos básicos)
 
 ### Hecho
@@ -230,7 +286,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/).
 - **Logging del orchestrator**: por qué *no* se generó pick (sharp ausente, gates fallaron, EV bajo, Shin no convergió). Va con structlog en Etapa 5.
 - **`request_id` propagado** a `generate_picks_for_event` y a los `Pick`s — Etapa 5 lo va a necesitar para correlacionar corridas.
 - **Aplicación de `max_picks_per_day` y `max_stake_per_event`** (ya en `bankroll.yaml`): el orchestrator es por-evento, los caps son globales. El caller (Etapa 5) debe leerlos antes de iterar eventos.
-- **Persistencia de `z` (sharp_overround)** en `Pick`: hoy `picks.py` descarta el `z` que devuelve `devig_shin`. Es información analítica gratis (mide liquidez del sharp). Requiere migración de DB → mejor sumarlo *antes* de Etapa 5.
+- **Persistencia de `z` (sharp_overround)** en `Pick`: hoy `picks.py` descarta el `z` que devuelve `devig_shin`. Es información analítica gratis (mide liquidez del sharp). Requiere migración de DB → mejor sumarlo *antes* de Etapa 5. **[RESUELTA en mini-commit post-sesión 6: migración `82dac86fd3e0`, persistido en `picks.py:137`, tests cubren shin (no-None) y multiplicative (None).]**
 - **Política de idempotencia explícita** en `PickRepo.create` ante duplicados: ¿raise o silent skip? El índice unique cubre la DB, falta la decisión a nivel API.
 - **Cacheo consistente en `yaml_config`**: `load_book_codes` usa `lru_cache`, los 5 loaders nuevos no. Unificar criterio.
 - **`MarketConfig.outcomes` a `tuple[str, ...]`**: hoy es `list` mutable dentro de un `@dataclass(frozen=True)`.

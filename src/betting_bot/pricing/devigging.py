@@ -4,7 +4,7 @@ Dos métodos:
 - **Multiplicativo**: simple, proporcional. Para mercados de 2 vías (totals, btts,
   spreads).
 - **Shin's method**: corrige el sesgo del favorito en mercados de 3 vías (h2h),
-  resuelto con `scipy.optimize.brentq` sobre `[eps, 0.5 - eps]`.
+  resuelto con `scipy.optimize.brentq` sobre `[eps, 0.99 - eps]`.
 
 Contrato: ambos devuelven probabilidades que SUMAN EXACTAMENTE 1 (tolerancia 1e-8).
 NO se re-normaliza — si Shin no converge bien, falla fuerte; preferimos no apostar

@@ -222,11 +222,11 @@ def test_skips_outcome_without_comparison_quotes() -> None:
 
 
 def test_uses_multiplicative_method_when_market_says_so() -> None:
-    # Mercado de 2 vías con método multiplicativo (totals).
-    totals_market = MarketConfig(
-        key="totals",
-        name="Over/Under",
-        outcomes=["over", "under"],
+    # Mercado de 2 vías con método multiplicativo (btts, no tiene línea).
+    btts_market = MarketConfig(
+        key="btts",
+        name="Both Teams To Score",
+        outcomes=["yes", "no"],
         devigging_method="multiplicative",
         min_ev=0.025,
     )
@@ -234,40 +234,57 @@ def test_uses_multiplicative_method_when_market_says_so() -> None:
     snaps = [
         build_odds_snapshot(
             event_id=event.id, bookmaker_key=_SHARP,
-            market_key="totals", outcome="over", price=1.90,
+            market_key="btts", outcome="yes", price=1.90,
         ),
         build_odds_snapshot(
             event_id=event.id, bookmaker_key=_SHARP,
-            market_key="totals", outcome="under", price=1.90,
+            market_key="btts", outcome="no", price=1.90,
         ),
-        # Comparación paga 2.10 sobre over → EV ≈ 0.05, holgadamente sobre min_ev.
+        # Comparación paga 2.10 sobre yes → EV ≈ 0.05, holgadamente sobre min_ev.
         build_odds_snapshot(
             event_id=event.id, bookmaker_key="bet365",
-            market_key="totals", outcome="over", price=2.10,
+            market_key="btts", outcome="yes", price=2.10,
         ),
         build_odds_snapshot(
             event_id=event.id, bookmaker_key="bet365",
-            market_key="totals", outcome="under", price=1.85,
+            market_key="btts", outcome="no", price=1.85,
         ),
         build_odds_snapshot(
             event_id=event.id, bookmaker_key="betsson",
-            market_key="totals", outcome="over", price=2.00,
+            market_key="btts", outcome="yes", price=2.00,
         ),
         build_odds_snapshot(
             event_id=event.id, bookmaker_key="betsson",
-            market_key="totals", outcome="under", price=1.85,
+            market_key="btts", outcome="no", price=1.85,
         ),
     ]
     picks = generate_picks_for_event(
         event=event, snapshots=snaps, bankroll=1_000_000,
-        markets=[totals_market], sharp_ref_key=_SHARP,
+        markets=[btts_market], sharp_ref_key=_SHARP,
         comparison_book_keys=_COMPS, quality_gates=_GATES, staking=_STAKING,
     )
-    over_picks = [p for p in picks if p.outcome == "over"]
-    assert len(over_picks) == 1
-    assert over_picks[0].devigging_method == "multiplicative"
+    yes_picks = [p for p in picks if p.outcome == "yes"]
+    assert len(yes_picks) == 1
+    assert yes_picks[0].devigging_method == "multiplicative"
     # El multiplicativo no estima z → sharp_overround debe ser None.
-    assert over_picks[0].sharp_overround is None
+    assert yes_picks[0].sharp_overround is None
+
+
+def test_raises_for_market_with_line_not_yet_supported() -> None:
+    # Defensa contra trampa silenciosa: si alguien activa `totals` en markets.yaml
+    # sin que el orchestrator cablée `line`, el índice único parcial colapsaría
+    # todos los picks de totals del día a uno solo. Falla loud antes.
+    totals_market = MarketConfig(
+        key="totals", name="Over/Under", outcomes=["over", "under"],
+        devigging_method="multiplicative", min_ev=0.025,
+    )
+    event = build_event()
+    with pytest.raises(NotImplementedError, match="Mercados con línea"):
+        generate_picks_for_event(
+            event=event, snapshots=[], bankroll=1_000_000,
+            markets=[totals_market], sharp_ref_key=_SHARP,
+            comparison_book_keys=_COMPS, quality_gates=_GATES, staking=_STAKING,
+        )
 
 
 def test_raises_for_unknown_devigging_method() -> None:

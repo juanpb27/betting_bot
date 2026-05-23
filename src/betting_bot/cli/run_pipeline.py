@@ -24,7 +24,7 @@ from betting_bot.ingestion.odds import OddsApiClient, OddsApiError
 from betting_bot.ingestion.schemas import OddsApiEvent
 from betting_bot.persistence.db import session_scope
 from betting_bot.persistence.models import ApiQuotaLog, Event, OddsSnapshot
-from betting_bot.persistence.repo import EventRepo, OddsRepo, QuotaRepo
+from betting_bot.persistence.repo import EventRepo, OddsRepo, QuotaRepo, SystemStateRepo
 from betting_bot.yaml_config import (
     LeagueConfig,
     load_active_leagues,
@@ -183,6 +183,15 @@ async def run_ingestion(
 
 
 async def _run() -> None:
+    with session_scope() as session:
+        state = SystemStateRepo(session).get()
+        if state.is_paused:
+            click.echo(
+                f"Sistema PAUSADO ({state.paused_reason or 'sin razón'}). "
+                f"Usa /resume para reanudar."
+            )
+            return
+
     settings = get_settings()
     leagues = load_active_leagues()
     bookmakers = load_odds_bookmakers()
@@ -220,11 +229,15 @@ def _print_summary(result: IngestionResult) -> None:
 
 
 @click.command()
-@click.option("--ingest-only", is_flag=True, help="Solo ingesta, sin pricing.")
-def main(ingest_only: bool) -> None:
-    """Corre el pipeline. Etapa 3: solo `--ingest-only` está implementado."""
-    if not ingest_only:
-        raise click.ClickException("Solo --ingest-only está implementado (Etapa 3).")
+@click.option(
+    "--ingest-only",
+    is_flag=True,
+    default=True,
+    help="Solo ingesta de fixtures y odds (sin pricing). Único modo soportado hoy; "
+    "el flag --full será para pipeline completo (pricing + notificación) en Etapa 6.",
+)
+def main(ingest_only: bool) -> None:  # noqa: ARG001 — placeholder hasta Etapa 6
+    """Corre el pipeline. Hoy: solo ingestion. Etapa 6 sumará pricing + notify."""
     asyncio.run(_run())
 
 

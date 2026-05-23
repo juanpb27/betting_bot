@@ -22,7 +22,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from betting_bot.delivery import telegram_handlers as h
-from betting_bot.delivery.telegram_bot import _wrap, is_authorized_chat
+from betting_bot.delivery.telegram_bot import _wrap, build_application, is_authorized_chat
 from betting_bot.persistence.db import apply_sqlite_pragmas
 from betting_bot.persistence.models import BankrollMovement, Base
 
@@ -40,21 +40,8 @@ def test_is_authorized_chat_rejects_none() -> None:
     assert is_authorized_chat(chat_id=None, authorized_id=12345) is False
 
 
-def test_build_application_registers_all_commands() -> None:
+def test_build_application_registers_all_commands(engine: Engine) -> None:
     """Smoke: la Application se construye y los 10 comandos quedan registrados."""
-    from sqlalchemy import create_engine
-    from sqlalchemy.pool import StaticPool
-
-    from betting_bot.delivery.telegram_bot import build_application
-    from betting_bot.persistence.db import apply_sqlite_pragmas
-    from betting_bot.persistence.models import Base
-
-    engine = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
-    apply_sqlite_pragmas(engine)
-    Base.metadata.create_all(engine)
-
     app = build_application(
         token="123:fake-token-shape", authorized_chat_id=42, engine=engine
     )

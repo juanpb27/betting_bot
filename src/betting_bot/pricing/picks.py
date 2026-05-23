@@ -15,6 +15,11 @@ from betting_bot.pricing.devigging import devig_multiplicative, devig_shin
 from betting_bot.pricing.value import assess_value
 from betting_bot.yaml_config import MarketConfig, QualityGates, StakingConfig
 
+# Mercados cuyo `Pick.line` queda en NULL (no tienen línea propia). Otros mercados
+# (totals, spreads) requieren `line` desde el snapshot; el orchestrator todavía
+# no lo cablea — falla loud antes que generar picks colapsados por el índice único.
+_MARKETS_WITHOUT_LINE = frozenset({"h2h", "btts"})
+
 
 def generate_picks_for_event(
     *,
@@ -31,6 +36,16 @@ def generate_picks_for_event(
     # Sin bankroll no hay nada que stake-ear. Cortocircuito antes de gastar CPU.
     if bankroll <= 0:
         return []
+    # Hoy solo h2h y btts se construyen sin línea. totals/spreads requieren
+    # asignar `line` desde el snapshot; sin eso, el índice único parcial
+    # `idx_picks_unique_no_line` colapsa todos los picks del día a uno solo
+    # por outcome. Falla loud antes de que se descubra en producción.
+    unsupported = [m.key for m in markets if m.key not in _MARKETS_WITHOUT_LINE]
+    if unsupported:
+        raise NotImplementedError(
+            f"Mercados con línea aún no soportados por el orchestrator: {unsupported}. "
+            f"Sumar handling de `line` desde OddsSnapshot antes de activarlos en markets.yaml."
+        )
     picks: list[Pick] = []
     for market in markets:
         market_snaps = [s for s in snapshots if s.market_key == market.key]

@@ -41,6 +41,11 @@ def build_application(
     *, token: str, authorized_chat_id: int, engine: Engine
 ) -> Application[Any, Any, Any, Any, Any, Any]:
     """Arma la Application con todos los CommandHandler registrados."""
+    missing = [fn.__name__ for fn in _COMMAND_MAP.values() if fn not in _HANDLER_DEPS]
+    if missing:
+        raise RuntimeError(
+            f"Handlers en _COMMAND_MAP sin entrada en _HANDLER_DEPS: {missing}"
+        )
     SessionFactory = sessionmaker(bind=engine)  # noqa: N806 — fábrica, no instancia
     app = Application.builder().token(token).build()
 
@@ -106,37 +111,42 @@ def _wrap(
 
 
 def _dispatch(handler_fn: _Handler, *, args: list[str], session: Session) -> str:
-    """Inyecta las dependencias que cada handler necesita por su firma.
+    """Inyecta las dependencias que cada handler necesita.
 
-    Mantiene los handlers puros (no se enteran de la session) sin meter un
-    framework de DI completo.
+    Cada handler declara su firma en `_HANDLER_DEPS` como tupla de strings con
+    las dependencias que pide ("args", "ledger", "system_repo", "pick_repo").
+    Más declarativo y robusto que el if/elif por `__name__`: renombrar un
+    handler obliga a actualizar el registry (que es tipado) en lugar de fallar
+    en runtime silenciosamente.
     """
-    name = handler_fn.__name__
-    ledger = BankrollLedger(session)
-    system_repo = SystemStateRepo(session)
-    pick_repo = PickRepo(session)
+    deps_factory: dict[str, Callable[[], Any]] = {
+        "args": lambda: args,
+        "ledger": lambda: BankrollLedger(session),
+        "system_repo": lambda: SystemStateRepo(session),
+        "pick_repo": lambda: PickRepo(session),
+    }
+    needed = _HANDLER_DEPS.get(handler_fn)
+    if needed is None:
+        raise RuntimeError(f"handler no registrado en _HANDLER_DEPS: {handler_fn!r}")
+    kwargs = {dep: deps_factory[dep]() for dep in needed}
+    return handler_fn(**kwargs)
 
-    if name == "handle_start":
-        return handler_fn()
-    if name == "handle_help":
-        return handler_fn()
-    if name == "handle_status":
-        return handler_fn(system_repo=system_repo)
-    if name == "handle_balance":
-        return handler_fn(ledger=ledger)
-    if name == "handle_bankroll":
-        return handler_fn(ledger=ledger, pick_repo=pick_repo)
-    if name == "handle_deposit":
-        return handler_fn(args=args, ledger=ledger)
-    if name == "handle_withdraw":
-        return handler_fn(args=args, ledger=ledger)
-    if name == "handle_adjust":
-        return handler_fn(args=args, ledger=ledger)
-    if name == "handle_pause":
-        return handler_fn(args=args, system_repo=system_repo)
-    if name == "handle_resume":
-        return handler_fn(system_repo=system_repo)
-    raise RuntimeError(f"handler no registrado: {name}")
+
+# Cada handler declara explícitamente qué dependencias necesita. Si renombrás
+# un handler y olvidás actualizar esto, falla loud en build_application (porque
+# _COMMAND_MAP referencia handlers que no están en _HANDLER_DEPS).
+_HANDLER_DEPS: dict[_Handler, tuple[str, ...]] = {
+    h.handle_start: (),
+    h.handle_help: (),
+    h.handle_status: ("system_repo",),
+    h.handle_balance: ("ledger",),
+    h.handle_bankroll: ("ledger", "pick_repo"),
+    h.handle_deposit: ("args", "ledger"),
+    h.handle_withdraw: ("args", "ledger"),
+    h.handle_adjust: ("args", "ledger"),
+    h.handle_pause: ("args", "system_repo"),
+    h.handle_resume: ("system_repo",),
+}
 
 
 # Mapeo declarativo de comando → handler puro.

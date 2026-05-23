@@ -18,7 +18,7 @@ from sqlalchemy import create_engine
 
 from betting_bot.config import get_settings
 from betting_bot.delivery.telegram_bot import build_application
-from betting_bot.persistence.db import apply_sqlite_pragmas
+from betting_bot.persistence.db import apply_sqlite_pragmas, resolve_database_url
 
 console = Console()
 
@@ -38,7 +38,7 @@ def main() -> None:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
 
-    engine = create_engine(settings.database_url)
+    engine = create_engine(resolve_database_url())
     apply_sqlite_pragmas(engine)
 
     app = build_application(
