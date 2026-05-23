@@ -144,3 +144,47 @@ def load_comparison_book_keys() -> frozenset[str]:
         for book in data.get("comparison_books", [])
         if book.get("enabled", True)
     )
+
+
+# --- Configs para delivery (Etapa 6) ------------------------------------------
+
+
+@dataclass(frozen=True)
+class NotificationConfig:
+    """Márgenes para sugerir stake `full` vs `half` sobre la cuota mínima."""
+
+    full_stake_margin_pct: float
+    half_stake_margin_pct: float
+
+
+@dataclass(frozen=True)
+class DestinationBook:
+    """Casa local donde se apuesta. Nombre legible + código interno + URL."""
+
+    code: str
+    name: str
+    url: str
+
+
+@lru_cache(maxsize=1)
+def load_notification_config() -> NotificationConfig:
+    """Lee `notification.*` de config/thresholds.yaml."""
+    data = load_yaml("thresholds.yaml")
+    n = data["notification"]
+    return NotificationConfig(
+        full_stake_margin_pct=float(n["full_stake_margin_pct"]),
+        half_stake_margin_pct=float(n["half_stake_margin_pct"]),
+    )
+
+
+@lru_cache(maxsize=1)
+def load_destination_books() -> tuple[DestinationBook, ...]:
+    """Lista de casas destino habilitadas con datos para los botones del wizard.
+    """
+    data = load_yaml("books.yaml")
+    books = data.get("destination_books", [])
+    return tuple(
+        DestinationBook(code=str(b["code"]), name=str(b["name"]), url=str(b["url"]))
+        for b in books
+        if b.get("enabled", True)
+    )

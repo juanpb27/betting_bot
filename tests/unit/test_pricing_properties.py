@@ -82,13 +82,23 @@ def test_shin_sums_to_one(prices: list[float]) -> None:
     assert abs(sum(fair) - 1.0) < 1e-8
 
 
+def _meaningfully_distinct(prices: list[float], min_gap: float = 0.05) -> bool:
+    """Verifica que las cuotas estén separadas por al menos `min_gap`. Sin
+    esto, hypothesis genera casos como `[1.01, 1.01, 1.0100000000000002]`
+    donde la diferencia entre `favorito` y `resto` es ruido FP (~1e-17), las
+    probs fair quedan numéricamente indistinguibles, y los asserts de orden
+    fallan por epsilons que no son bugs."""
+    s = sorted(prices)
+    return all(b - a >= min_gap for a, b in zip(s, s[1:], strict=False))
+
+
 @given(prices=st.lists(_price, min_size=3, max_size=3))
 @settings(suppress_health_check=[HealthCheck.filter_too_much], deadline=None)
 def test_shin_preserves_order_in_3way(prices: list[float]) -> None:
     # En h2h (3 outcomes), el favorito (menor cuota) debe seguir teniendo la
     # mayor prob fair.
     assume(_has_overround(prices))
-    assume(len(set(prices)) == 3)
+    assume(_meaningfully_distinct(prices))
     fair, _ = devig_shin(prices)
     ranked_by_price = sorted(range(3), key=lambda i: prices[i])
     ranked_by_prob = sorted(range(3), key=lambda i: -fair[i])
@@ -102,9 +112,9 @@ def test_shin_corrects_favorite_longshot_bias(prices: list[float]) -> None:
     # MÁS prob al favorito que el multiplicativo. Refs: Shin (1993), Štrumbelj
     # (2014), Buchdahl.
     assume(sum(1 / p for p in prices) > 1.005)
-    fav_idx = min(range(3), key=lambda i: prices[i])
-    assume(prices.count(prices[fav_idx]) == 1)
+    assume(_meaningfully_distinct(prices))
 
+    fav_idx = min(range(3), key=lambda i: prices[i])
     shin_probs, z = devig_shin(prices)
     mult_probs = devig_multiplicative(prices)
     # Si Shin no detectó insider (z muy chico), la diferencia es ruido FP.

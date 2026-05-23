@@ -14,7 +14,7 @@ quality_gates:                       # [usado] — pricing/picks.py
   require_sharp_quoted: true         # exige cotización de Pinnacle para calcular p_real
   min_comparison_books_quoted: 2     # mínimo de casas EU con cuota antes de evaluar valor
 
-notification:                        # [pendiente] — formato Telegram, Etapa 5
+notification:                        # [usado] — delivery/pick_notifier.py (Etapa 6)
   # Cuánto por encima de la cuota mínima sugerimos para stake "full" vs "half"
   full_stake_margin_pct: 0.04        # threshold_full = min_odds * (1 + 0.04)
   half_stake_margin_pct: 0.02        # threshold_half = min_odds * (1 + 0.02)

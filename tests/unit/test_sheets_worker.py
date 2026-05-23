@@ -80,6 +80,12 @@ def test_process_pick_row_marks_failed_if_pick_missing(
 
     assert ok is False
     fake_sheets.append_row.assert_not_called()
+    # Side-effect crítico: mark_failed se invocó y dejó traza.
+    session.refresh(row)
+    assert row.attempts == 1
+    assert row.last_error is not None
+    assert "doesnt-exist" in row.last_error
+    assert row.completed_at is None
 
 
 # --- process_pending_row: movement ------------------------------------------
@@ -130,6 +136,10 @@ def test_process_movement_row_marks_failed_if_movement_missing(
     row = queue.enqueue("movement", {"movement_id": 999_999})
     ok = process_pending_row(row, session=session, sheets_client=fake_sheets)
     assert ok is False
+    session.refresh(row)
+    assert row.attempts == 1
+    assert row.last_error is not None
+    assert "999999" in row.last_error
 
 
 # --- process_pending_row: bankroll_snapshot ---------------------------------
@@ -181,6 +191,46 @@ def test_process_row_propagates_gspread_error_as_failure(
 
     ok = process_pending_row(row, session=session, sheets_client=fake_sheets)
     assert ok is False
+    # mark_failed se invocó incluso ante gspread error.
+    session.refresh(row)
+    assert row.attempts == 1
+    assert row.last_error is not None
+    assert "429" in row.last_error or "APIError" in row.last_error
+
+
+def test_process_row_recovers_if_mark_failed_itself_errors(
+    session: Session, fake_sheets: MagicMock
+) -> None:
+    """Si `mark_failed` mismo levanta (DB rota, fila borrada por otro proceso),
+    process_pending_row NO debe propagar — el contrato del worker es 'una fila
+    no rompe el lote'. Hoy se loguea y se devuelve False sin tirar."""
+    ledger = BankrollLedger(session)
+    mv = ledger.record_deposit("betplay", 100_000)
+    queue = PendingSheetsSyncRepo(session)
+    row = queue.enqueue("movement", {"movement_id": mv.id})
+    fake_sheets.append_row.side_effect = gspread.exceptions.APIError(
+        MagicMock(status_code=429, text="too many")
+    )
+
+    # Borramos la fila manualmente para simular "mark_failed encuentra que
+    # la fila ya no existe" (race con otro proceso o admin manual).
+    row_id = row.id
+    session.delete(row)
+    session.flush()
+    # Recreamos el objeto en memoria (sin DB row): mark_failed va a tirar.
+    # Trick: re-leemos el objeto antes del delete, lo mantenemos en memoria.
+    # Más simple: re-armamos con el id.
+    from betting_bot.persistence.models import PendingSheetsSync
+    orphan = PendingSheetsSync(
+        id=row_id,
+        payload_type="movement",
+        payload_json='{"movement_id": ' + str(mv.id) + '}',
+        attempts=0,
+    )
+    # Llamada NO debe propagar a pesar de que el sync falla Y el mark_failed
+    # también falla (fila no existe en DB).
+    ok = process_pending_row(orphan, session=session, sheets_client=fake_sheets)
+    assert ok is False  # contrato cumplido
 
 
 # Nota: NO testeamos el caso "payload_type desconocido en runtime" porque el
@@ -226,3 +276,36 @@ def test_drain_queue_respects_limit(
     assert counts == {"completed": 2, "failed": 0}
     # Quedan 3 pendientes.
     assert len(queue.next_batch(limit=10)) == 3
+
+
+def test_drain_queue_commits_per_row_so_late_crash_does_not_undo_earlier(
+    session: Session, fake_sheets: MagicMock
+) -> None:
+    """Crítico: si la fila N de un lote causa que `process_pending_row`
+    propague (defensive code falla, DB rota), los `mark_completed` de las
+    filas 1..N-1 deben PERSISTIR. Sin commit por fila, todo el lote
+    rollbackea → re-procesamiento → doble append a Sheets."""
+    ledger = BankrollLedger(session)
+    queue = PendingSheetsSyncRepo(session)
+    mv1 = ledger.record_deposit("betplay", 100_000)
+    mv2 = ledger.record_deposit("codere", 50_000)
+    queue.enqueue("movement", {"movement_id": mv1.id})
+    queue.enqueue("movement", {"movement_id": mv2.id})
+
+    # Hacemos que el SEGUNDO append explote (no atrapable por process_pending_row
+    # porque... bueno, sí lo atrapa, pero igualmente verificamos que el primer
+    # mark_completed haya commiteado y NO se vea como pendiente).
+    call_count = {"n": 0}
+    def fail_on_second(name: str, _row: list[object]) -> None:
+        call_count["n"] += 1
+        if call_count["n"] == 2:
+            raise gspread.exceptions.APIError(MagicMock(status_code=500, text="boom"))
+    fake_sheets.append_row.side_effect = fail_on_second
+
+    drain_queue(session=session, sheets_client=fake_sheets, limit=10)
+
+    # Después del drain: la primera quedó completed (NO debe aparecer en
+    # next_batch), la segunda quedó pendiente con attempts=1.
+    pending = queue.next_batch(limit=10)
+    assert len(pending) == 1
+    assert pending[0].attempts == 1

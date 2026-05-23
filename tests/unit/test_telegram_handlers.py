@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from betting_bot.bankroll.ledger import BankrollLedger
 from betting_bot.delivery.telegram_handlers import (
-    _fmt_amount,
+    fmt_amount,
     handle_adjust,
     handle_balance,
     handle_bankroll,
@@ -258,17 +258,17 @@ def _assert_valid_markdown_v2(text: str) -> None:
         i += 1
 
 
-def test_fmt_amount_wraps_value_in_backticks() -> None:
+def testfmt_amount_wraps_value_in_backticks() -> None:
     # El `.` (separador de miles estilo COP) está RESERVADO en MarkdownV2.
     # Envolverlo en backticks evita escape carácter-por-carácter y a la vez
     # lo muestra en monospace.
-    out = _fmt_amount(1_000_000)
+    out = fmt_amount(1_000_000)
     assert out == "`1.000.000`"
 
 
 def test_handle_balance_output_is_valid_markdown_v2(session: Session) -> None:
     # Regresión: bug detectado en runtime — `.` del formato de monto rompía
-    # MarkdownV2. _fmt_amount ahora envuelve en backticks.
+    # MarkdownV2. fmt_amount ahora envuelve en backticks.
     ledger = BankrollLedger(session)
     ledger.record_deposit("betplay", 1_500_000)
     ledger.record_deposit("codere", 750_000)

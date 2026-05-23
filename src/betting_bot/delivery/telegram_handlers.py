@@ -65,7 +65,7 @@ def parse_book(s: str) -> str:
 # --- Helpers de formato -----------------------------------------------------
 
 
-def _fmt_amount(n: int) -> str:
+def fmt_amount(n: int) -> str:
     """Formato de monto con separador de miles, envuelto en backticks.
 
     Devuelve `` `1.000.000` ``: monospace y, lo más importante, los puntos no
@@ -118,9 +118,9 @@ def handle_balance(*, ledger: BankrollLedger) -> str:
     total = ledger.get_total_balance()
     lines = ["*Balance por casa*"]
     for book, amount in sorted(balances.items()):
-        lines.append(f"`{book}`: {_fmt_amount(amount)}")
+        lines.append(f"`{book}`: {fmt_amount(amount)}")
     lines.append("")
-    lines.append(f"*Total*: {_fmt_amount(total)}")
+    lines.append(f"*Total*: {fmt_amount(total)}")
     return "\n".join(lines)
 
 
@@ -128,7 +128,7 @@ def handle_bankroll(*, ledger: BankrollLedger, pick_repo: PickRepo) -> str:
     total = ledger.get_total_balance()
     pending = len(pick_repo.list_by_status("pending"))
     return (
-        f"*Bankroll vivo*: {_fmt_amount(total)}\n"
+        f"*Bankroll vivo*: {fmt_amount(total)}\n"
         f"*Picks pendientes*: {pending}"
     )
 
@@ -141,8 +141,8 @@ def handle_deposit(*, args: list[str], ledger: BankrollLedger) -> str:
     ledger.record_deposit(book, amount)
     new_balance = ledger.get_balance_by_book()[book]
     return (
-        f"Depósito registrado: \\+{_fmt_amount(amount)} en `{book}`\n"
-        f"Saldo `{book}`: {_fmt_amount(new_balance)}"
+        f"Depósito registrado: \\+{fmt_amount(amount)} en `{book}`\n"
+        f"Saldo `{book}`: {fmt_amount(new_balance)}"
     )
 
 
@@ -154,8 +154,8 @@ def handle_withdraw(*, args: list[str], ledger: BankrollLedger) -> str:
     ledger.record_withdrawal(book, amount)
     new_balance = ledger.get_balance_by_book()[book]
     return (
-        f"Retiro registrado: \\-{_fmt_amount(amount)} de `{book}`\n"
-        f"Saldo `{book}`: {_fmt_amount(new_balance)}"
+        f"Retiro registrado: \\-{fmt_amount(amount)} de `{book}`\n"
+        f"Saldo `{book}`: {fmt_amount(new_balance)}"
     )
 
 
@@ -169,9 +169,9 @@ def handle_adjust(*, args: list[str], ledger: BankrollLedger) -> str:
     new_balance = ledger.get_balance_by_book()[book]
     sign = "\\+" if signed > 0 else "\\-"
     return (
-        f"Ajuste registrado: {sign}{_fmt_amount(abs(signed))} en `{book}` "
+        f"Ajuste registrado: {sign}{fmt_amount(abs(signed))} en `{book}` "
         f"\\({escape_md(reason)}\\)\n"
-        f"Saldo `{book}`: {_fmt_amount(new_balance)}"
+        f"Saldo `{book}`: {fmt_amount(new_balance)}"
     )
 
 

@@ -47,7 +47,13 @@ def process_pending_row(
     sheets_client: SheetsClient,
 ) -> bool:
     """Procesa una fila de la cola. Devuelve True si quedó completed, False
-    si falló (y se llamó `mark_failed`). NO commitea — el caller lo hace."""
+    si falló (y se intentó `mark_failed`). NO commitea — el caller lo hace
+    por fila (ver `drain_queue`).
+
+    Si el propio `mark_failed`/`mark_completed` levanta (DB rota, fila borrada
+    por otro proceso entre el SELECT y el UPDATE), se atrapa y loguea sin
+    propagar: el contrato del worker es "una fila no debe romper el lote".
+    """
     queue = PendingSheetsSyncRepo(session)
     try:
         payload = json.loads(row.payload_json)
@@ -71,9 +77,25 @@ def process_pending_row(
             error=repr(exc),
             attempts=row.attempts + 1,
         )
-        queue.mark_failed(row.id, error=repr(exc))
+        try:
+            queue.mark_failed(row.id, error=repr(exc))
+        except Exception as inner:
+            _log.error(
+                "sheets_sync_mark_failed_itself_errored",
+                row_id=row.id,
+                original_error=repr(exc),
+                mark_failed_error=repr(inner),
+            )
         return False
-    queue.mark_completed(row.id)
+    try:
+        queue.mark_completed(row.id)
+    except Exception as inner:
+        _log.error(
+            "sheets_sync_mark_completed_errored_after_append",
+            row_id=row.id,
+            error=repr(inner),
+        )
+        return False
     _log.info("sheets_sync_completed", row_id=row.id, payload_type=row.payload_type)
     return True
 
@@ -81,11 +103,20 @@ def process_pending_row(
 def drain_queue(
     *, session: Session, sheets_client: SheetsClient, limit: int = 50
 ) -> dict[str, int]:
-    """Procesa hasta `limit` filas pendientes. Devuelve `{"completed", "failed"}`."""
+    """Procesa hasta `limit` filas pendientes con commit por fila.
+
+    Cada fila se commitea apenas se marca completed/failed. Sin commit por
+    fila, una excepción no atrapada a mitad de lote rollbackeaba las marcas
+    de las filas previas → re-procesamiento → doble append a Sheets.
+    """
     queue = PendingSheetsSyncRepo(session)
     counts = {"completed": 0, "failed": 0}
     for row in queue.next_batch(limit=limit):
-        if process_pending_row(row, session=session, sheets_client=sheets_client):
+        ok = process_pending_row(
+            row, session=session, sheets_client=sheets_client
+        )
+        session.commit()
+        if ok:
             counts["completed"] += 1
         else:
             counts["failed"] += 1

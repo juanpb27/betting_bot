@@ -3,6 +3,57 @@
 Todos los cambios significativos del proyecto se registran aquí.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/).
 
+## [2026-05-23] — Sesión 9: Etapa 6 (parcial — pasos 1-7 de 13)
+
+### Hecho
+- **Paso 1 — `PickRepo.mark_placed` y `mark_skipped`** (TDD strict): UPDATE condicional con `rowcount` check para cerrar race de doble-click del wizard. Reject si `status != 'pending'` o si datos inválidos. 15 tests incluyendo 2 de race con sesiones independientes.
+- **Paso 1.5 — `PickRepo.get_with_event`**: JOIN single-query pick + event, usado por worker y notifier.
+- **Paso 2 — Modelo `PendingSheetsSync`** + migración Alembic `80f0759a2448` con CHECK constraint sobre `payload_type` y índice parcial sobre `completed_at IS NULL`.
+- **Paso 3 — `PendingSheetsSyncRepo`** (TDD strict): `enqueue` con validación Python de `payload_type` (frozenset), `next_batch` filtra `attempts < MAX_SHEETS_SYNC_ATTEMPTS=10` (dead-letter), `count_dead_letter()` helper. 12 tests.
+- **Paso 4 — `delivery/sheets_sync.py`** (TDD strict): mappers puros `pick_to_row`, `movement_to_row`, `bankroll_snapshot_row`. Headers `PICKS_HEADERS`, `MOVEMENTS_HEADERS`, `BANKROLL_HEADERS` matchean DESIGN §9 exacto. TZ del proyecto, naive datetime asume UTC. 18 tests.
+- **Paso 5 — `delivery/sheets_client.py`**: wrapper gspread con cache real `dict[str, Worksheet]`, `ensure_worksheet` idempotente (crea con headers si no existe; no-op si sí), `append_row` consulta cache antes del lookup. Propagación explícita de `gspread.APIError`. 9 tests con mocks.
+- **Paso 6 — `delivery/sheets_worker.py` + `cli/sheets_worker.py`** (TDD strict): `process_pending_row` re-lee entidad canónica de DB (encolamos solo IDs), captura excepciones → `mark_failed`. `drain_queue` commitea **por fila** para que un crash tardío no rollbackee `mark_completed` previos (evita doble append). CLI con `fcntl.flock(LOCK_EX | LOCK_NB)` lockfile en `data/sheets_worker.lock`, `--once`, `--limit`. 11 tests + smoke manual end-to-end del usuario validado (4 escenarios: append, encolar+drain, dead-letter, lockfile).
+- **Paso 7 — `delivery/pick_notifier.py`** (TDD strict): `build_pick_message(pick, event, notification, staking, min_ev) -> str` MarkdownV2 con formato DESIGN §6 (sin emojis por regla CLAUDE.md). Recalcula `stake_full`/`stake_half` corriendo `assess_value` a las cuotas threshold (NO `stake_recommended / 2`). Omite líneas cuando `has_value=False` o `stake_recommended=0` (sub-floor). `build_pick_keyboard(pick_id)` con 3 botones inline. `parse_pick_action(callback_data)` helper para el wizard (paso 8). `threshold_for_margin(min_odds, margin_pct)`. 18 tests incluyendo formato MD V2 válido, escape de caracteres especiales en nombres de equipos (Saint-Étienne, F.C.), round-trip con `build_pick_keyboard`, sub-floor edge.
+- **`yaml_config.py`**: `NotificationConfig`, `DestinationBook` + loaders cacheados (`load_notification_config`, `load_destination_books`).
+- **`config/thresholds.yaml`**: sección `notification:` marcada `[usado]`.
+- **`telegram_handlers.py`**: `_fmt_amount`/`_MD_V2_RESERVED` renombrados a públicos (`fmt_amount`, `escape_md`) — eran importados por `pick_notifier` con underscore. Mover a un módulo `_md.py` compartido es deuda diferida.
+- **268 tests unit + 3 integration verdes**, ruff + mypy --strict limpios. Coverage delivery + repo = 93%.
+
+### Decisiones de diseño
+- **Outbox encola solo IDs** (no payloads completos): el worker re-lee la entidad canónica de DB. Elimina drift entre payload encolado y estado actual, y la posibilidad de que `json.dumps(default=str)` serialice tipos complejos como `repr(obj)`.
+- **Commit por fila en `drain_queue`** (no por lote): un crash tardío en process_pending_row no debe rollbackear los `mark_completed` de filas previas, porque el append a Sheets YA pasó (no es transaccional con la DB). Sin commit por fila, una fila rota → re-procesamiento → **doble append**.
+- **Defensivo en `process_pending_row`**: si el propio `mark_failed`/`mark_completed` levanta (DB rota, fila borrada por race con otro proceso), se atrapa y loguea sin propagar. Contrato: "una fila no rompe el lote".
+- **Lockfile `fcntl.flock` para sheets_worker**: previene doble-process si systemd se solapa con corrida manual. Unix-only — OK para Linux + WSL (deployment target).
+- **`callback_data` formato `pa:<action>:<pick_id>`**: prefijo corto para caber en 64 bytes con UUID v4. `parse_pick_action` anclado en tests para que renombrar el formato rompa en el notifier, no en el wizard.
+- **`MAX_SHEETS_SYNC_ATTEMPTS = 10`**: cubre 429 transitorios con backoff implícito (entre corridas del worker); corta errores permanentes (403, payload malformado). Dead-letter visible vía `count_dead_letter()`.
+
+### Deuda técnica nueva (auditada por TL + back-eng + qa pre-paso-8)
+**Diferida con razón:**
+- **Test de race "genuina" sin commit intermedio**: el test actual (`test_mark_placed_race_two_sessions_first_wins`) es secuencial disfrazado — s1 commitea antes de que s2 ejecute UPDATE. La race real con dos UPDATEs en paralelo en SQLite + WAL levanta `OperationalError` (lock contention), no `ValueError` (rowcount=0). El wizard debe atrapar ambos.
+- **Backoff exponencial en `drain_queue`** si todo el lote falla (API caída): hoy reentra al siguiente lote sin pausa, quemando attempts. Para systemd-driven OK (cada timer da pausa); para manual `--once` repetido, mitigá vos.
+- **`league_key` crudo en mensajes Telegram y filas Sheets** (`soccer_epl` en vez de "Premier League"): falta un `display_name` en `leagues.yaml` + mapping. Defer al cierre de Etapa 6 o Etapa 7.
+- **CLI `cli/sheets_worker.py` sin tests automatizados**: el `main` con click cubierto solo por smoke manual del usuario. Extraer la lógica del loop a una función pura testeable como deuda.
+- **`fcntl` Unix-only**: si alguien quiere correr el worker en Windows nativo, el `import fcntl` falla. Trade-off aceptable (deployment es Linux).
+- **`_fmt_amount`/`escape_md`** ahora públicos en `telegram_handlers` — encajar en un módulo `delivery/_md.py` compartido para no acoplar `pick_notifier` con el módulo de comandos.
+- **Test flaky de hypothesis** `test_shin_preserves_order_in_3way` en `test_pricing_properties.py`: aparece con seeds random. Deuda heredada de E4, no de E6. Revisar al volver a tocar pricing.
+
+**Mejorable, no urgente:**
+- `mark_placed` hace `flush()` antes del `get(pick_id)` que luego se `refresh()`. El flush es redundante (UPDATE ya ejecutó); el refresh es necesario para invalidar identity map. Limpieza cosmética.
+- `pick_notifier` usa `pa:` como prefijo de `callback_data` — el wizard del paso 8 podría querer compartirlo via constante exportada en lugar de hardcodearla del lado consumidor.
+
+### Lo bien hecho (validado por reviews independientes)
+- Patrón outbox encolando solo IDs y commit por fila — decisiones correctas y bien documentadas en docstrings.
+- Recálculo de `stake_full`/`stake_half` con Kelly a la cuota threshold (no `stake / 2`) — refleja entendimiento de Kelly.
+- Cap de dead-letter explícito + `count_dead_letter()` helper — convierte agujero operacional silencioso en algo monitoreable.
+- Cache real de worksheet instances (vs cosmético previo) — evita N lookups por batch.
+- UPDATE condicional con `rowcount` check en `mark_placed/skipped` — cierra el race de doble-click.
+
+### Siguiente sesión
+- **Paso 8**: `pick_wizard.py` handlers puros con TDD strict (handle_chose_book / handle_entered_price / handle_entered_stake / handle_confirmed / handle_chose_skip_reason). El último debe envolver `mark_placed + record_bet_stake` en una transacción atómica (NO commitear entre los dos).
+- **Pasos 9-13**: wiring async `ConversationHandler` con timeout 10 min, registrar en `telegram_bot`, `run_pipeline --full`, smoke E2E manual, cerrar CHANGELOG E6.
+
+---
+
 ## [2026-05-23] — Sesión 8: Hardening pre-Etapa 6 (auditoría TL + back-eng)
 
 ### Contexto
