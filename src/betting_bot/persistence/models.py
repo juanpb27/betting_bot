@@ -214,6 +214,47 @@ class ApiQuotaLog(Base):
     __table_args__ = (Index("idx_aql_provider", "provider", "captured_at"),)
 
 
+class PendingSheetsSync(Base):
+    """Cola de payloads pendientes de sincronizar a Google Sheets.
+
+    Sheets sync no es bloqueante: el pipeline / wizard encolan al commitear DB,
+    y un worker (`cli/sheets_worker.py`) drena la cola con retries. Si Sheets
+    API está caída, la operación sigue funcionando — los datos llegan a Sheets
+    cuando la API vuelva o cuando el operador corra el worker.
+    """
+
+    __tablename__ = "pending_sheets_sync"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    # 'pick' | 'movement' | 'bankroll_snapshot'. CHECK constraint lo enforce.
+    payload_type: Mapped[str]
+    # JSON serializado del payload. El worker lo deserializa según payload_type
+    # y llama al mapper / sync correspondiente.
+    payload_json: Mapped[str]
+    attempts: Mapped[int] = mapped_column(server_default=text("0"))
+    last_error: Mapped[str | None]
+    created_at: Mapped[datetime] = mapped_column(server_default=text("CURRENT_TIMESTAMP"))
+    last_attempt_at: Mapped[datetime | None]
+    # NULL = pendiente. NOT NULL = ya sincronizado correctamente.
+    completed_at: Mapped[datetime | None]
+
+    __table_args__ = (
+        CheckConstraint(
+            "payload_type IN ('pick', 'movement', 'bankroll_snapshot')",
+            name="ck_pss_payload_type",
+        ),
+        # Worker filtra por completed_at IS NULL y ordena por created_at; índice
+        # parcial sobre las pendientes mantiene la query barata aunque la tabla
+        # crezca con histórico completo.
+        Index(
+            "idx_pss_pending",
+            "created_at",
+            unique=False,
+            sqlite_where=text("completed_at IS NULL"),
+        ),
+    )
+
+
 class OperationLog(Base):
     """Log de operaciones del sistema."""
 
