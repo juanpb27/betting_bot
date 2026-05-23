@@ -3,6 +3,53 @@
 Todos los cambios significativos del proyecto se registran aquí.
 Formato basado en [Keep a Changelog](https://keepachangelog.com/).
 
+## [2026-05-22] — Sesión 7: Etapa 5 (Telegram bot — comandos básicos)
+
+### Hecho
+- `delivery/telegram_handlers.py`: funciones puras `handle_*` para los 10 comandos (`/start`, `/help`, `/status`, `/balance`, `/bankroll`, `/deposit`, `/withdraw`, `/adjust`, `/pause`, `/resume`) + parsers (`parse_amount`, `parse_signed_amount`, `parse_book`) + helper `escape_md` para MarkdownV2.
+- `delivery/telegram_bot.py`: `build_application(token, authorized_chat_id, engine)` arma la `Application` de python-telegram-bot v21 con todos los `CommandHandler` registrados. `_wrap(handler_fn, ...)` envuelve cada handler puro con autorización (`is_authorized_chat`), apertura/cierre de `Session`, commit en éxito, rollback + reply en `ValueError`, rollback + log en excepción genérica.
+- `cli/telegram_listener.py`: entry point CLI, valida settings, arma engine + Application, `run_polling()` bloqueante. En prod lo dispara `betting-bot-telegram.service` (Etapa 10).
+- `SystemStateRepo.pause(reason)` y `.resume()` (TDD): setean/limpian `is_paused`, `paused_reason`, `paused_at`. Resume es idempotente.
+- 30 tests nuevos: 4 de SystemStateRepo, 22 de handlers puros + parsers (TDD strict), 4 de auth/wrapper async (mocks de Telegram), 1 smoke del bootstrap.
+- 172 tests totales en verde, ruff + mypy limpios, coverage `delivery/` = 82% (`handlers.py` 96%, `bot.py` 66% — async wrapper testeado en las ramas críticas commit/rollback/auth; ramas de dispatch por comando individual no cubiertas).
+
+### Bugs encontrados en pruebas locales (runtime)
+- **`_fmt_amount` producía `1.000.000` sin escapar el `.`**, caracter reservado en MarkdownV2. Telegram rechazaba con `BadRequest: Can't parse entities: character '.' is reserved` en cualquier comando que mostrara monto (`/balance`, `/bankroll`, `/deposit`, `/withdraw`, `/adjust`). Fix: envolver el monto en backticks (dentro de `code` no necesitan escape) — bonus: se ve en monospace. Tests existentes pasaban porque solo verificaban substring del monto, no validez del MarkdownV2. Agregado un heurístico `_assert_valid_markdown_v2` y 5 tests de regresión sobre `handle_balance`/`deposit`/`adjust`/`start`/`help`.
+- **Polling procesaba backlog de mensajes acumulados** desde la última vez que el bot estuvo offline. Fix: `Application.run_polling(drop_pending_updates=True)` en `cli/telegram_listener.py`.
+
+### Decisiones tomadas
+- **Single chat**: solo `settings.telegram_chat_id` puede mandar comandos. Cualquier otro chat se rechaza con silencio total (no se responde) + log warning. El silencio es deliberado: un bot sondeado por terceros no debe confirmarles que existe.
+- **Polling, no webhook**: `Application.run_polling()` es bloqueante y no requiere IP pública / cert / URL configurada. Suficiente para single-tenant. Webhook = TBD si crece carga (no esperado).
+- **Handlers puros + wrapper async**: separación estricta. `handle_X(args, *, deps) -> str` es testable contra DB en memoria sin tocar Telegram. La capa async se testea con mocks (`AsyncMock`/`MagicMock`) para validar transacciones y autorización.
+- **Errores de input** modelados como `ValueError`: el wrapper los devuelve al usuario con prefijo "ERROR:" + rollback. Excepciones genéricas → rollback + "ERROR interno, ya está logueado" + log con stack.
+- **MarkdownV2** para responses, con escape explícito de input variable (razones de pause, errores). Sin emojis (regla CLAUDE.md).
+- **`/bankroll` sin P&L** semana/mes — depende de `analytics/metrics.py` (vacío, Etapa 8). Hoy solo total + count de pending picks.
+- **`/pause [reason]`** con reason opcional (default "manual pause via Telegram"). `/resume` sin args limpia los 3 campos del singleton.
+- **Logging stdlib** (`logging`) por ahora; migración a structlog = Etapa 8.
+
+### Deuda técnica (heredada + nueva)
+**Resuelta en esta sesión**: `SystemStateRepo` ya no es solo-lectura.
+
+**Nueva — Etapa 5 introduce, diferida a Etapa 6/7/8:**
+- **Notificaciones de picks a Telegram** y wizard inline ("ya apostada / descartar") — Etapa 6.
+- **Sheets sync** desde los handlers (cuando se registra un deposit/withdrawal, debería ir a la hoja "Movements" también) — Etapa 6.
+- **Sin ConversationHandler / FSM**: los comandos son one-shot. Si en Etapa 6 los wizards inline se complican, evaluar.
+- **`telegram_bot.py` 66% coverage**: el dispatch por comando individual no está cubierto por test propio. Aceptable porque cada `handle_X` ya tiene su test; el dispatch es solo cableado. Si se vuelve más complejo, agregar parametrized test.
+- **Sin retries en escrituras**: si SQLite falla por write lock (raro con WAL), el handler levanta y el wrapper rollbackea. No reintenta. Suficiente para volumen esperado.
+- **MarkdownV2 escaping**: el helper `escape_md` cubre el set reservado. Casos extremos (emojis ZWJ, RTL marks) no testeados — los handlers no los emiten.
+- **Comandos avanzados** (`/today`, `/week`, `/pending`) — Etapa 8, requieren `analytics/`.
+- **Test de integración con Telegram real** (test_token) — Etapa 10, con servidor.
+
+**Nueva — descubierta en review TL pre-commit:**
+- **Sin `app.add_error_handler` global de PTB**: hoy las excepciones fuera del wrapper (ej. `BadRequest` de Telegram si MarkdownV2 escapa mal o el bot pierde permisos) se loguean por el logger interno de python-telegram-bot pero no se canalizan a nuestro logging. Fix: agregar handler global cuando se monte structlog (Etapa 8).
+- **TOCTOU teórico en operaciones concurrentes sobre el mismo book**: dos `/withdraw` simultáneos pueden leer el balance pre-commit del otro. En single-user esto es teórico (vos no mandás dos comandos en el mismo ms). Se vuelve real si se mete multi-user, multi-canal o un worker async paralelo escribiendo al mismo book. Mitigación cuando aparezca: `SELECT ... FOR UPDATE` (no aplica en SQLite) o lock a nivel app por `book_code`.
+- **`handle_status` no incluye `paused_at` ni `last_pipeline_run_at`**: serían útiles operativamente ("pausado hace 3 días", "último pipeline corrió hace 8h"). Defer a Etapa 8 cuando esos campos se llenen de verdad.
+
+### Siguiente sesión
+- **Etapa 6: Sheets sync + delivery de picks**. Implementar `delivery/sheets_sync.py` (`sync_pick_to_sheets`, `sync_movement_to_sheets`, `sync_bankroll_snapshot`), enviar notificación de pick formateada al chat de Telegram autorizado, agregar wizard inline ("ya apostada" / "descartar") que escribe a `picks` (status), `bankroll_movements` (stake) y Sheets.
+
+---
+
 ## [2026-05-18] — Sesión 0: bootstrap del repositorio
 
 ### Hecho

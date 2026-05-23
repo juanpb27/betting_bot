@@ -134,6 +134,24 @@ class SystemStateRepo:
             self._session.flush()
         return state
 
+    def pause(self, reason: str, *, paused_at: datetime | None = None) -> SystemState:
+        """Pone el sistema en pausa. Pausar dos veces sobrescribe la razón."""
+        state = self.get()
+        state.is_paused = True
+        state.paused_reason = reason
+        state.paused_at = paused_at or datetime.now(UTC)
+        self._session.flush()
+        return state
+
+    def resume(self) -> SystemState:
+        """Quita la pausa y limpia razón/timestamp. Idempotente sobre estado limpio."""
+        state = self.get()
+        state.is_paused = False
+        state.paused_reason = None
+        state.paused_at = None
+        self._session.flush()
+        return state
+
 
 class QuotaRepo:
     """Acceso a `api_quota_log` — registro de consumo de cuota de las APIs."""

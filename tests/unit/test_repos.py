@@ -198,6 +198,42 @@ def test_system_state_repo_is_idempotent(session: Session) -> None:
     assert count == 1
 
 
+def test_system_state_repo_pause_sets_flag_reason_and_timestamp(session: Session) -> None:
+    repo = SystemStateRepo(session)
+    state = repo.pause(reason="manual pause via Telegram")
+    assert state.is_paused is True
+    assert state.paused_reason == "manual pause via Telegram"
+    assert state.paused_at is not None
+    # Verifica persistencia: una nueva session ve el estado pausado.
+    fresh = SystemStateRepo(session).get()
+    assert fresh.is_paused is True
+    assert fresh.paused_reason == "manual pause via Telegram"
+
+
+def test_system_state_repo_resume_clears_pause_fields(session: Session) -> None:
+    repo = SystemStateRepo(session)
+    repo.pause(reason="test")
+    state = repo.resume()
+    assert state.is_paused is False
+    assert state.paused_reason is None
+    assert state.paused_at is None
+
+
+def test_system_state_repo_pause_twice_overwrites_reason(session: Session) -> None:
+    # Pausar dos veces no apila — la segunda razón gana.
+    repo = SystemStateRepo(session)
+    repo.pause(reason="first reason")
+    state = repo.pause(reason="second reason")
+    assert state.paused_reason == "second reason"
+
+
+def test_system_state_repo_resume_when_not_paused_is_noop(session: Session) -> None:
+    # Resume sobre estado limpio no falla.
+    repo = SystemStateRepo(session)
+    state = repo.resume()
+    assert state.is_paused is False
+
+
 # --- EventRepo (Etapa 3) / QuotaRepo ------------------------------------------
 
 

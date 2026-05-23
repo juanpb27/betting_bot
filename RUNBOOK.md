@@ -352,7 +352,7 @@ Cada etapa es un bloque de trabajo coherente con entregable verificable. No hay 
   - Sin convergencia fallida en Shin.
   - Reconciliation sin inconsistencias.
 - **Transición a operación real**:
-  - `rm data/betting_bot.db` en el servidor.
+  - `rm -f data/betting_bot.db data/betting_bot.db-wal data/betting_bot.db-shm` en el servidor (los `-wal` y `-shm` son auxiliares del WAL mode; si solo borrás el `.db` y queda un `-wal` colgado, la próxima conexión puede reportar `database disk image is malformed`).
   - `uv run alembic upgrade head` (DB limpia).
   - Registrar deposits reales vía Telegram con los montos efectivamente depositados en cada casa.
   - Primer día de operación real.
